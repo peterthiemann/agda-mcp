@@ -22,6 +22,7 @@
     "typecheck": "tsc -p tsconfig.json",
     "test:compile": "npm run clean:test && tsc -p tsconfig.test.json",
     "test": "npm run test:compile && node scripts/run-tests.mjs unit",
+    "test:fuzz": "npm run test:compile && node scripts/run-tests.mjs fuzz",
     "test:integration": "npm run test:compile && node scripts/run-tests.mjs integration",
     "test:all": "npm run test:compile && node scripts/run-tests.mjs",
     "start": "node dist/index.js",
@@ -38,6 +39,7 @@
   "sideEffects": false,
   "devDependencies": {
     "@types/node": "^22.20.1",
+    "fast-check": "4.9.0",
     "typescript": "^7.0.2"
   }
 }

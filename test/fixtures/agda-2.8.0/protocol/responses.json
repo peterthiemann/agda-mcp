@@ -1,0 +1,60 @@
+{
+  "load": {
+    "events": [
+      { "kind": "Status", "status": { "checked": false, "showImplicitArguments": false, "showIrrelevantArguments": false } },
+      { "kind": "ClearRunningInfo" },
+      { "debugLevel": 1, "kind": "RunningInfo", "message": "Checking Tiny (/workspace/Tiny.agda).\n" },
+      { "info": { "errors": [], "invisibleGoals": [], "kind": "AllGoalsWarnings", "visibleGoals": [{ "constraintObj": { "id": 0, "range": [{ "end": { "col": 15, "line": 4, "pos": 57 }, "start": { "col": 8, "line": 4, "pos": 50 } }] }, "kind": "OfType", "type": "A" }], "warnings": [] }, "kind": "DisplayInfo" },
+      { "interactionPoints": [{ "id": 0, "range": [{ "end": { "col": 15, "line": 4, "pos": 57 }, "start": { "col": 8, "line": 4, "pos": 50 } }] }], "kind": "InteractionPoints" }
+    ]
+  },
+  "metas": {
+    "events": [{ "info": { "errors": [], "invisibleGoals": [], "kind": "AllGoalsWarnings", "visibleGoals": [], "warnings": [] }, "kind": "DisplayInfo" }]
+  },
+  "goalTypeContext": {
+    "events": [{ "info": { "goalInfo": { "boundary": [], "entries": [{ "binding": "A", "inScope": true, "originalName": "x", "reifiedName": "x" }], "kind": "GoalType", "outputForms": [], "rewrite": "Simplified", "type": "A", "typeAux": { "kind": "GoalOnly" } }, "interactionPoint": { "id": 0, "range": [] }, "kind": "GoalSpecific" }, "kind": "DisplayInfo" }]
+  },
+  "constraints": {
+    "events": [{ "info": { "constraints": [], "kind": "Constraints" }, "kind": "DisplayInfo" }]
+  },
+  "makeCase": {
+    "events": [{ "interactionPoint": { "id": 0, "range": [] }, "kind": "MakeCase", "variant": "Function", "clauses": ["f true = ?", "f false = ?"] }]
+  },
+  "refineOrIntro": {
+    "events": [{ "giveResult": { "str": "x" }, "interactionPoint": { "id": 0, "range": [] }, "kind": "GiveAction" }]
+  },
+  "autoOne": {
+    "events": [{ "giveResult": { "str": "x" }, "interactionPoint": { "id": 0, "range": [] }, "kind": "GiveAction" }]
+  },
+  "compute": {
+    "events": [{ "info": { "computeMode": "DefaultCompute", "expr": "x", "kind": "NormalForm", "time": null }, "kind": "DisplayInfo" }]
+  },
+  "computeTopLevel": {
+    "events": [{ "info": { "computeMode": "DefaultCompute", "expr": "λ x → x", "kind": "NormalForm", "time": null }, "kind": "DisplayInfo" }]
+  },
+  "infer": {
+    "events": [{ "info": { "expr": "A", "kind": "InferredType", "time": null }, "kind": "DisplayInfo" }]
+  },
+  "inferTopLevel": {
+    "events": [{ "info": { "expr": "{A : Set} → A → A", "kind": "InferredType", "time": null }, "kind": "DisplayInfo" }]
+  },
+  "abort": {
+    "events": [{ "kind": "DoneAborting" }]
+  },
+  "typeError": {
+    "events": [{ "info": { "error": { "message": "Set != Set₁", "range": [] }, "kind": "Error" }, "kind": "DisplayInfo" }]
+  },
+  "warning": {
+    "events": [{ "info": { "errors": [], "invisibleGoals": [], "kind": "AllGoalsWarnings", "visibleGoals": [], "warnings": [{ "kind": "TerminationIssue", "message": "Termination checking failed" }] }, "kind": "DisplayInfo" }]
+  },
+  "failedSearch": {
+    "events": [{ "info": { "kind": "Auto", "message": "No solution found" }, "kind": "DisplayInfo" }]
+  },
+  "malformedCommand": {
+    "stdout": ["cannot read: not-a-command\n"],
+    "events": []
+  },
+  "unknownEvent": {
+    "events": [{ "kind": "FutureEvent", "newField": { "nested": true }, "message": "literal JSON> inside a string" }]
+  }
+}

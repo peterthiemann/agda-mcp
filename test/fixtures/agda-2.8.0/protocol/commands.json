@@ -1,0 +1,71 @@
+[
+  {
+    "name": "load",
+    "command": { "kind": "load", "modulePath": "/workspace/Tiny.agda", "arguments": ["--safe", "--library=stdlib"] },
+    "expected": "IOTCM \"/workspace/Tiny.agda\" None Direct (Cmd_load \"/workspace/Tiny.agda\" [\"--safe\", \"--library=stdlib\"])\n"
+  },
+  {
+    "name": "metas",
+    "command": { "kind": "metas" },
+    "expected": "IOTCM \"/workspace/Tiny.agda\" None Direct (Cmd_metas AsIs)\n"
+  },
+  {
+    "name": "goalTypeContext",
+    "command": {
+      "kind": "goalTypeContext",
+      "interactionPoint": 0,
+      "rewrite": "normalised",
+      "range": {
+        "file": "/workspace/Tiny.agda",
+        "start": { "offset": 10, "line": 2, "column": 3 },
+        "end": { "offset": 15, "line": 2, "column": 8 }
+      }
+    },
+    "expected": "IOTCM \"/workspace/Tiny.agda\" None Direct (Cmd_goal_type_context Normalised 0 (intervalsToRange (Just (mkAbsolute \"/workspace/Tiny.agda\")) [Interval () (Pn () 10 2 3) (Pn () 15 2 8)]) \"\")\n"
+  },
+  {
+    "name": "constraints",
+    "command": { "kind": "constraints" },
+    "expected": "IOTCM \"/workspace/Tiny.agda\" None Direct (Cmd_constraints)\n"
+  },
+  {
+    "name": "makeCase",
+    "command": { "kind": "makeCase", "interactionPoint": 1, "variables": "x" },
+    "expected": "IOTCM \"/workspace/Tiny.agda\" None Direct (Cmd_make_case 1 noRange \"x\")\n"
+  },
+  {
+    "name": "refineOrIntro",
+    "command": { "kind": "refineOrIntro", "interactionPoint": 1, "expression": "λ x → x", "usePatternLambda": true },
+    "expected": "IOTCM \"/workspace/Tiny.agda\" None Direct (Cmd_refine_or_intro True 1 noRange \"\\x3bb\\& x \\x2192\\& x\")\n"
+  },
+  {
+    "name": "autoOne",
+    "command": { "kind": "autoOne", "interactionPoint": 1, "query": "-t 5" },
+    "expected": "IOTCM \"/workspace/Tiny.agda\" None Direct (Cmd_autoOne AsIs 1 noRange \"-t 5\")\n"
+  },
+  {
+    "name": "compute",
+    "command": { "kind": "compute", "interactionPoint": 1, "expression": "id x", "mode": "head" },
+    "expected": "IOTCM \"/workspace/Tiny.agda\" None Direct (Cmd_compute HeadCompute 1 noRange \"id x\")\n"
+  },
+  {
+    "name": "computeTopLevel",
+    "command": { "kind": "computeTopLevel", "expression": "id", "mode": "ignore_abstract" },
+    "expected": "IOTCM \"/workspace/Tiny.agda\" None Direct (Cmd_compute_toplevel IgnoreAbstract \"id\")\n"
+  },
+  {
+    "name": "infer",
+    "command": { "kind": "infer", "interactionPoint": 1, "expression": "x", "rewrite": "instantiated" },
+    "expected": "IOTCM \"/workspace/Tiny.agda\" None Direct (Cmd_infer Instantiated 1 noRange \"x\")\n"
+  },
+  {
+    "name": "inferTopLevel",
+    "command": { "kind": "inferTopLevel", "expression": "id" },
+    "expected": "IOTCM \"/workspace/Tiny.agda\" None Direct (Cmd_infer_toplevel Simplified \"id\")\n"
+  },
+  {
+    "name": "abort",
+    "command": { "kind": "abort" },
+    "expected": "IOTCM \"/workspace/Tiny.agda\" None Direct (Cmd_abort)\n"
+  }
+]

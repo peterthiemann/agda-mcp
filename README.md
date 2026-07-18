@@ -4,10 +4,11 @@
 interaction protocol. It will support on-disk `.agda`, `.lagda`, and
 `.lagda.md` modules through a long-lived Agda subprocess per workspace.
 
-The repository currently contains the package foundation plus the
-transport-neutral domain, configuration, and discovery layers described by P0
-and P1 of the [implementation plan](./IMPLEMENTATION_PLAN.md). The stdio MCP
-server and Agda interaction tools are implemented in later phases.
+The repository currently contains the package foundation, transport-neutral
+domain and discovery layers, and the Agda 2.8.0 protocol/process host described
+by P0 through P2 of the [implementation plan](./IMPLEMENTATION_PLAN.md). The
+stdio MCP server and application-level session tools are implemented in later
+phases.
 
 ## Requirements
 
@@ -23,6 +24,7 @@ Agda is an external runtime dependency and is not bundled in the npm package.
 npm ci
 npm run typecheck
 npm test
+npm run test:fuzz
 npm run test:integration
 npm run build
 npm run smoke
@@ -31,6 +33,24 @@ npm pack --dry-run
 
 Normal logs and child-process diagnostics will use stderr. Once the MCP server
 is enabled, stdout will be reserved exclusively for MCP protocol framing.
+
+### Protocol parser fuzzing
+
+`npm run test:fuzz` combines grammar-aware property tests with deterministic
+mutation and arbitrary-byte fuzzing. The default campaign runs 1,000 cases per
+property, 5,000 recorded-corpus mutations, and 1,250 arbitrary byte streams.
+Failures report a reproducible seed; property failures also report fast-check's
+shrink path.
+
+The campaign size and seed can be overridden for longer local or scheduled
+runs:
+
+```sh
+AGDA_MCP_PROPERTY_RUNS=10000 \
+AGDA_MCP_FUZZ_RUNS=50000 \
+AGDA_MCP_FUZZ_SEED=685383720 \
+npm run test:fuzz
+```
 
 ## Design
 

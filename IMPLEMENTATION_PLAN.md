@@ -156,11 +156,11 @@ format-independent portions of P5 can also proceed concurrently after P3.
 
 ### 5.1 Command encoding
 
-- [ ] Implement and exhaustively test a Haskell string-literal encoder for
+- [x] Implement and exhaustively test a Haskell string-literal encoder for
   quotes, slashes, control characters, newlines, and Unicode.
-- [ ] Define a version-neutral command model and an `AgdaProtocolAdapter`
+- [x] Define a version-neutral command model and an `AgdaProtocolAdapter`
   interface.
-- [ ] Implement the Agda 2.8.0 encodings for:
+- [x] Implement the Agda 2.8.0 encodings for:
   - `Cmd_load`
   - `Cmd_metas`
   - `Cmd_goal_type_context`
@@ -171,40 +171,40 @@ format-independent portions of P5 can also proceed concurrently after P3.
   - `Cmd_compute` and `Cmd_compute_toplevel`
   - `Cmd_infer` and `Cmd_infer_toplevel`
   - `Cmd_abort`
-- [ ] Wrap commands in `IOTCM <file> None Direct ...` without shell quoting.
+- [x] Wrap commands in `IOTCM <file> None Direct ...` without shell quoting.
 
 ### 5.2 Streaming response parser
 
-- [ ] Parse arbitrary stdout chunk boundaries incrementally.
-- [ ] Recognize `JSON>` only between protocol messages, not inside JSON strings.
-- [ ] Handle a prompt and the next JSON event sharing one physical line.
-- [ ] Parse each native JSON object without evaluating it.
-- [ ] Preserve unknown events and unknown fields.
-- [ ] Capture non-JSON stdout fragments and stderr as diagnostics.
-- [ ] Stream byte counts and omission digests without retaining output above the
+- [x] Parse arbitrary stdout chunk boundaries incrementally.
+- [x] Recognize `JSON>` only between protocol messages, not inside JSON strings.
+- [x] Handle a prompt and the next JSON event sharing one physical line.
+- [x] Parse each native JSON object without evaluating it.
+- [x] Preserve unknown events and unknown fields.
+- [x] Capture non-JSON stdout fragments and stderr as diagnostics.
+- [x] Stream byte counts and omission digests without retaining output above the
   soft return budgets.
-- [ ] Enforce 128 KiB raw and 32 KiB stderr soft defaults at complete-event
+- [x] Enforce 128 KiB raw and 32 KiB stderr soft defaults at complete-event
   boundaries.
-- [ ] Enforce the 16 MiB aggregate hard limit even for a single unterminated
+- [x] Enforce the 16 MiB aggregate hard limit even for a single unterminated
   event or stderr flood.
 
 ### 5.3 Process host
 
-- [ ] Spawn `agda --interaction-json` with `shell: false` and the workspace root
+- [x] Spawn `agda --interaction-json` with `shell: false` and the workspace root
   as its working directory.
-- [ ] Capture child stdout/stderr; never pipe either stream to MCP stdout.
-- [ ] Expose start, send-one-command, abort, terminate, and exit-notification
+- [x] Capture child stdout/stderr; never pipe either stream to MCP stdout.
+- [x] Expose start, send-one-command, abort, terminate, and exit-notification
   operations.
-- [ ] Guarantee exactly one active command per process.
-- [ ] Associate command completion with the next recognized prompt.
-- [ ] Return raw transcript and typed protocol failures.
+- [x] Guarantee exactly one active command per process.
+- [x] Associate command completion with the next recognized prompt.
+- [x] Return raw transcript and typed protocol failures.
 
 ### 5.4 Protocol fixtures
 
-- [ ] Capture sanitized Agda 2.8.0 transcripts for every required command.
-- [ ] Store inputs and native output events separately so encoding and decoding
+- [x] Capture sanitized Agda 2.8.0 transcripts for every required command.
+- [x] Store inputs and native output events separately so encoding and decoding
   can be tested independently.
-- [ ] Include success, type error, warning, empty constraint, failed search,
+- [x] Include success, type error, warning, empty constraint, failed search,
   malformed command, and unknown-event fixtures.
 
 ### 5.5 P2 tests and gate
