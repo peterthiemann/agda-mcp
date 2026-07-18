@@ -98,49 +98,49 @@ format-independent portions of P5 can also proceed concurrently after P3.
 
 ### 4.1 Transport-neutral domain
 
-- [ ] Define normalized source positions/ranges, diagnostics, goals,
+- [x] Define normalized source positions/ranges, diagnostics, goals,
   metavariables, context entries, constraints, text edits, and result envelopes.
-- [ ] Define `RawCommandTranscript`, truncation metadata, restore transcripts,
+- [x] Define `RawCommandTranscript`, truncation metadata, restore transcripts,
   and captured stderr types.
-- [ ] Define stable application errors and codes from the design.
-- [ ] Define the transport-independent `AgdaService` interface containing all
+- [x] Define stable application errors and codes from the design.
+- [x] Define the transport-independent `AgdaService` interface containing all
   twelve operations.
-- [ ] Keep MCP SDK types out of `application/`, `discovery/`, `sessions/`,
+- [x] Keep MCP SDK types out of `application/`, `discovery/`, `sessions/`,
   `protocol/`, and `normalization/`.
 
 ### 4.2 Configuration
 
-- [ ] Parse and validate MCP initialization options.
-- [ ] Apply defaults for executable resolution, timeouts, output budgets, and
+- [x] Parse and validate MCP initialization options.
+- [x] Apply defaults for executable resolution, timeouts, output budgets, and
   `allowAgdaExec: false`.
-- [ ] Reject invalid, negative, or internally inconsistent limits before
+- [x] Reject invalid, negative, or internally inconsistent limits before
   starting a child process.
-- [ ] Model workspace overrides without introducing a mandatory project config
+- [x] Model workspace overrides without introducing a mandatory project config
   file.
 
 ### 4.3 Agda installation discovery
 
-- [ ] Resolve an explicit executable or `agda` from the current `PATH` on each
+- [x] Resolve an explicit executable or `agda` from the current `PATH` on each
   MCP server start.
-- [ ] Probe `--numeric-version`, `--print-agda-app-dir`, and
+- [x] Probe `--numeric-version`, `--print-agda-app-dir`, and
   `--print-agda-data-dir` without a shell.
-- [ ] Return an exact 2.8.0 compatibility status or an `unverified` warning for
+- [x] Return an exact 2.8.0 compatibility status or an `unverified` warning for
   another detected version.
-- [ ] Never persist resolved installation or library locations across runs.
+- [x] Never persist resolved installation or library locations across runs.
 
 ### 4.4 Workspace and project discovery
 
-- [ ] Canonicalize workspace roots and target paths with `realpath`.
-- [ ] Match `.lagda.md` before `.lagda` and `.agda`; reject other direct targets.
-- [ ] Find the nearest ancestor `.agda-lib`, otherwise use the containing MCP
+- [x] Canonicalize workspace roots and target paths with `realpath`.
+- [x] Match `.lagda.md` before `.lagda` and `.agda`; reject other direct targets.
+- [x] Find the nearest ancestor `.agda-lib`, otherwise use the containing MCP
   workspace root.
-- [ ] Parse `.agda-lib` name, include, depend, and flags fields needed to build
+- [x] Parse `.agda-lib` name, include, depend, and flags fields needed to build
   `Cmd_load` arguments.
-- [ ] Resolve relative includes against the `.agda-lib` directory.
-- [ ] Merge project values with initialization overrides deterministically.
-- [ ] Reject `--allow-exec` unless the server was initialized with explicit
+- [x] Resolve relative includes against the `.agda-lib` directory.
+- [x] Merge project values with initialization overrides deterministically.
+- [x] Reject `--allow-exec` unless the server was initialized with explicit
   authorization.
-- [ ] Allow registered imports outside the workspace while rejecting direct
+- [x] Allow registered imports outside the workspace while rejecting direct
   tool targets outside configured roots.
 
 ### 4.5 P1 tests and gate

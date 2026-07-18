@@ -4,9 +4,10 @@
 interaction protocol. It will support on-disk `.agda`, `.lagda`, and
 `.lagda.md` modules through a long-lived Agda subprocess per workspace.
 
-The repository currently contains the package foundation described by P0 of
-the [implementation plan](./IMPLEMENTATION_PLAN.md). The stdio MCP server and
-Agda interaction tools are implemented in later phases.
+The repository currently contains the package foundation plus the
+transport-neutral domain, configuration, and discovery layers described by P0
+and P1 of the [implementation plan](./IMPLEMENTATION_PLAN.md). The stdio MCP
+server and Agda interaction tools are implemented in later phases.
 
 ## Requirements
 
