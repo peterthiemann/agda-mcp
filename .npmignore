@@ -1,0 +1,9 @@
+src/
+test/
+scripts/
+.github/
+.test-dist/
+coverage/
+tsconfig*.json
+DESIGN.md
+IMPLEMENTATION_PLAN.md

@@ -1,0 +1,43 @@
+{
+  "name": "agda-mcp",
+  "version": "0.0.0-development",
+  "description": "A non-mutating MCP server for Agda's interaction protocol",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "agda-mcp": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "clean": "node scripts/clean.mjs dist .test-dist coverage",
+    "clean:build": "node scripts/clean.mjs dist",
+    "clean:test": "node scripts/clean.mjs .test-dist",
+    "build": "npm run clean:build && tsc -p tsconfig.build.json && node scripts/make-executable.mjs",
+    "typecheck": "tsc -p tsconfig.json",
+    "test:compile": "npm run clean:test && tsc -p tsconfig.test.json",
+    "test": "npm run test:compile && node scripts/run-tests.mjs unit",
+    "test:integration": "npm run test:compile && node scripts/run-tests.mjs integration",
+    "test:all": "npm run test:compile && node scripts/run-tests.mjs",
+    "start": "node dist/index.js",
+    "smoke": "node dist/index.js --help",
+    "prepack": "npm run test:all && npm run build && npm run smoke"
+  },
+  "keywords": [
+    "agda",
+    "mcp",
+    "model-context-protocol",
+    "theorem-proving"
+  ],
+  "license": "UNLICENSED",
+  "sideEffects": false,
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "typescript": "^7.0.2"
+  }
+}

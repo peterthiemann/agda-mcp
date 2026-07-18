@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.test-dist/
+coverage/
+*.tgz
+*.agdai
+_build/
+.DS_Store
+*.log
