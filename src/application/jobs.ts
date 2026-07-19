@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 
 import {
+  DEFAULT_ASYNC_MODE,
   DEFAULT_DEFER_AFTER_MS,
   DEFAULT_HANDLE_ENTROPY_BYTES,
   DEFAULT_JOB_RETENTION_MS,
@@ -31,7 +32,7 @@ export interface JobPolicy {
 }
 
 export const DEFAULT_JOB_POLICY: JobPolicy = Object.freeze({
-  asyncMode: "auto",
+  asyncMode: DEFAULT_ASYNC_MODE,
   deferAfterMs: DEFAULT_DEFER_AFTER_MS,
   maxJobWaitMs: DEFAULT_MAX_JOB_WAIT_MS,
   jobRetentionMs: DEFAULT_JOB_RETENTION_MS,
@@ -142,6 +143,11 @@ export class JobRegistry<T = unknown> {
       state: "running",
     };
 
+    // Registered before the operation starts, so maxTrackedJobs bounds all
+    // active work rather than only the part that has already been deferred.
+    // Anything that settles inside the defer window is released again below.
+    this.#admit(record);
+
     const work = (async () => operation(controller.signal))().then(
       (value) => {
         this.#settle(record, "succeeded", { value });
@@ -151,24 +157,27 @@ export class JobRegistry<T = unknown> {
       },
     );
 
+    // Collect inline: the caller receives the outcome directly, so the record
+    // must be released whether it succeeded or threw.
+    const collectInline = (): JobOutcome<T> => {
+      detachRequest();
+      this.#jobs.delete(record.id);
+      return { kind: "settled", value: this.#unwrap(record) };
+    };
+
     if (asyncMode === "never") {
       await work;
-      detachRequest();
-      return { kind: "settled", value: this.#unwrap(record) };
+      return collectInline();
     }
 
     if (asyncMode !== "always") {
       const settledInWindow = await raceWithDelay(work, deferAfterMs);
-      if (settledInWindow) {
-        detachRequest();
-        return { kind: "settled", value: this.#unwrap(record) };
-      }
+      if (settledInWindow) return collectInline();
     }
 
     // Still running: hand back a handle and let it continue unattended.
     deferred = true;
     detachRequest();
-    this.#track(record);
     return { kind: "deferred", job: this.#summarize(record) };
   }
 
@@ -183,9 +192,10 @@ export class JobRegistry<T = unknown> {
       if (bounded > 0) await this.#waitForSettlement(record, bounded);
     }
     if (record.state === "running") return { kind: "deferred", job: this.#summarize(record) };
-    const value = this.#unwrap(record);
+    // Released before unwrapping, because unwrapping a failed or cancelled job
+    // throws — leaving the record behind would hold capacity until expiry.
     this.#jobs.delete(id);
-    return { kind: "settled", value };
+    return { kind: "settled", value: this.#unwrap(record) };
   }
 
   /**
@@ -271,10 +281,14 @@ export class JobRegistry<T = unknown> {
     }
   }
 
-  #track(record: JobRecord<T>): void {
+  /**
+   * Admit a job into the registry, rejecting it if that would exceed capacity.
+   * Called before the operation starts so no Agda work is begun that the
+   * registry has no room to track.
+   */
+  #admit(record: JobRecord<T>): void {
     if (this.#jobs.size >= this.#policy.maxTrackedJobs) this.prune();
     if (this.#jobs.size >= this.#policy.maxTrackedJobs) {
-      record.controller.abort(new Error("Job registry is full"));
       throw new ApplicationError(
         "AGDA_COMMAND_REJECTED",
         "Too many in-flight Agda jobs; await or cancel an existing job first",
@@ -320,8 +334,9 @@ export class JobRegistry<T = unknown> {
         notifiers.set(record, notify);
         record.waiters.add(notify);
       }
+      // Deliberately not unref'd: this timer is awaited. It is cleared by
+      // finish(), which every exit path calls.
       timer = setTimeout(() => finish(undefined), waitMs);
-      timer.unref?.();
     });
   }
 
@@ -333,8 +348,9 @@ export class JobRegistry<T = unknown> {
         record.waiters.delete(notify);
         resolve();
       };
+      // Deliberately not unref'd: this timer is awaited, so it must keep the
+      // event loop alive. It is always cleared, either here or on settlement.
       timer = setTimeout(notify, waitMs);
-      timer.unref?.();
       record.waiters.add(notify);
     });
   }
@@ -382,8 +398,9 @@ export class JobRegistry<T = unknown> {
 async function raceWithDelay(work: Promise<unknown>, delayMs: number): Promise<boolean> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const expiry = new Promise<false>((resolve) => {
+    // Deliberately not unref'd: the caller awaits this race, so an unref'd
+    // timer would let the process exit with the defer window unresolved.
     timer = setTimeout(() => resolve(false), delayMs);
-    timer.unref?.();
   });
   try {
     return await Promise.race([work.then(() => true), expiry]);

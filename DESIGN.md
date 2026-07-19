@@ -255,36 +255,35 @@ workspace revision changes after every reload or recovery.
 
 ### 8.2 Opaque goal handles
 
-A goal handle is an unguessable token backed by a server-side table. Clients do
-not see or provide bare Agda interaction-point IDs. A handle is valid only when:
+A goal handle is an unguessable random token backed by a server-side table.
+Clients do not see or provide bare Agda interaction-point IDs. Handles are
+never derived from goal content: a derived token could be reconstructed after
+the table had deliberately dropped it, which would let a handle come back to
+life after switching away from and back to a module.
+
+A handle is valid only when:
 
 - its workspace session still exists;
 - its module is still the active module;
+- its load generation equals the current generation;
 - the source fingerprint still matches; and
 - its interaction point is still present.
 
-Handles are derived deterministically, by HMAC over the workspace, module path,
-source fingerprint, and interaction point, keyed with a per-session secret. Two
-consequences follow.
+A *load generation* identifies one externally observable Agda state. It
+advances on every load, typecheck, module switch and process recovery, so all
+of those invalidate existing handles — unchanged top-level source does not
+imply unchanged imported dependencies or unchanged Agda state, so nothing
+weaker would be sound.
 
-Reloading identical bytes reissues byte-identical handles, so a handle survives
-a plain `typecheck`, a process recovery, and the internal restore reload that
-case split, refine, and auto perform. This removes the round trip that would
-otherwise be needed to re-fetch goals after every preview.
+The single exception is the internal restore reload that a transformation
+preview performs. Because that reload replays byte-identical source purely to
+undo the preview, it preserves the generation and reissues the same tokens for
+the same interaction points. This is what keeps case split, refine and auto
+from invalidating the caller's handles as a side effect. The reload falls back
+to a new generation, and fresh handles, whenever the fingerprint it restored
+does not match the one it started from.
 
-A change to the source changes the fingerprint and therefore every handle for
-that module. This is the safety property that matters: once the bytes change,
-Agda may renumber interaction points, so an old handle must never silently
-resolve to a different hole. It fails with `STALE_GOAL_HANDLE` instead.
-
-Note that the revision is deliberately *not* part of the validity test. Given an
-identical fingerprint and a live interaction point, revision equality adds no
-correctness guarantee — interaction-point numbering is a function of the source
-text — while costing every caller its handles on each reload.
-
-Loading another module still invalidates the previous module's handles, since
-the module path is part of the derivation. Stale use fails with
-`STALE_GOAL_HANDLE` and does not reach Agda.
+Stale use fails with `STALE_GOAL_HANDLE` and does not reach Agda.
 
 ### 8.3 External source changes
 

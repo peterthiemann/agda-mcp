@@ -34,7 +34,7 @@ import {
   type InstallationDiscoveryDependencies,
 } from "../discovery/agdaInstallation.js";
 import { agda280Adapter } from "../protocol/adapters/agda-2.8.0.js";
-import type { RawAgdaResponse } from "./domain.js";
+import type { RawAgdaResponse, RawCommandTranscript } from "./domain.js";
 import {
   WorkspaceSessionManager,
   type WorkspaceSessionManagerOptions,
@@ -70,6 +70,68 @@ export interface AgdaApplicationServiceDependencies {
   readonly installation?: AgdaInstallation;
   readonly installationDiscovery?: InstallationDiscoveryDependencies;
   readonly processHostFactory?: WorkspaceSessionManagerOptions["processHostFactory"];
+}
+
+/**
+ * A batch entry may legitimately fail on its own: a stale handle, a rejected
+ * command, a source change. Anything else — a dead process, a failed restore,
+ * a cancelled request, a bad argument — indicates the batch as a whole cannot
+ * continue and must propagate.
+ */
+const PER_GOAL_FAILURE_CODES: ReadonlySet<string> = new Set([
+  "STALE_GOAL_HANDLE",
+  "SOURCE_CHANGED",
+  "AGDA_COMMAND_REJECTED",
+  "COMMAND_TIMEOUT",
+  "OUTPUT_LIMIT_EXCEEDED",
+  "UNSUPPORTED_EDIT_SHAPE",
+  "NO_ACTIVE_MODULE",
+  "UNKNOWN_WORKSPACE",
+]);
+
+function isPerGoalFailure(error: unknown): boolean {
+  return error instanceof ApplicationError && PER_GOAL_FAILURE_CODES.has(error.code);
+}
+
+function rawTranscript(raw: RawAgdaResponse): RawCommandTranscript {
+  return Object.freeze({
+    events: raw.events,
+    complete: raw.complete,
+    capturedBytes: raw.capturedBytes,
+    totalBytes: raw.totalBytes,
+    omittedEventCount: raw.omittedEventCount,
+    stderr: raw.stderr,
+    ...(raw.omittedSha256 === undefined ? {} : { omittedSha256: raw.omittedSha256 }),
+  });
+}
+
+/**
+ * Combine the per-command transcripts of a batch into one response. Every
+ * command's events and byte counts are represented; nothing is silently
+ * dropped just because several commands ran.
+ */
+function mergeTranscripts(
+  adapter: string,
+  transcripts: readonly RawCommandTranscript[],
+): RawAgdaResponse {
+  if (transcripts.length === 0) return emptyRaw(adapter);
+  const stderrChunks = transcripts.flatMap((entry) => [...entry.stderr.chunks]);
+  const sum = (pick: (entry: RawCommandTranscript) => number): number =>
+    transcripts.reduce((total, entry) => total + pick(entry), 0);
+  return Object.freeze({
+    adapter,
+    events: Object.freeze(transcripts.flatMap((entry) => [...entry.events])),
+    complete: transcripts.every((entry) => entry.complete),
+    capturedBytes: sum((entry) => entry.capturedBytes),
+    totalBytes: sum((entry) => entry.totalBytes),
+    omittedEventCount: sum((entry) => entry.omittedEventCount),
+    stderr: Object.freeze({
+      chunks: Object.freeze(stderrChunks),
+      complete: transcripts.every((entry) => entry.stderr.complete),
+      capturedBytes: sum((entry) => entry.stderr.capturedBytes),
+      totalBytes: sum((entry) => entry.stderr.totalBytes),
+    }),
+  });
 }
 
 function emptyRaw(adapter: string): RawAgdaResponse {
@@ -225,26 +287,22 @@ export class AgdaApplicationService implements AgdaService {
     context?: OperationContext,
   ): Promise<NormalizedResult<ContextsResult>> {
     const entries: ContextsEntry[] = [];
-    const transcripts: RawAgdaResponse[] = [];
-    const warnings: string[] = [];
+    const transcripts: RawCommandTranscript[] = [];
 
     for (const goal of request.goals) {
       context?.signal?.throwIfAborted();
+      let single;
       try {
-        const single = await this.retrieveContext(
+        single = await this.retrieveContext(
           { goal, ...(request.rewrite === undefined ? {} : { rewrite: request.rewrite }) },
           context,
         );
-        entries.push(Object.freeze({ goal, ok: true, context: single.data }));
-        transcripts.push(single.raw);
-        warnings.push(...single.warnings);
       } catch (error: unknown) {
-        const applicationError =
-          error instanceof ApplicationError
-            ? error
-            : new ApplicationError("AGDA_COMMAND_REJECTED", "Goal context lookup failed", {
-                cause: error,
-              });
+        // Only per-goal problems become entries. A dead process, a failed
+        // restore or a cancellation is not this goal's fault and must abort
+        // the batch instead of being reported as one goal's error.
+        if (!isPerGoalFailure(error)) throw error;
+        const applicationError = error as ApplicationError;
         entries.push(
           Object.freeze({
             goal,
@@ -256,20 +314,25 @@ export class AgdaApplicationService implements AgdaService {
             }),
           }),
         );
+        continue;
       }
+      entries.push(Object.freeze({ goal, ok: true, context: single.data }));
+      transcripts.push(rawTranscript(single.raw));
     }
 
     const succeeded = entries.filter((entry) => entry.ok).length;
-    return result(
-      Object.freeze({
+    return Object.freeze({
+      data: Object.freeze({
         requested: request.goals.length,
         succeeded,
         failed: entries.length - succeeded,
         contexts: Object.freeze(entries),
       }),
-      transcripts[0] ?? emptyRaw(this.#installation.adapter),
-      [...this.#installation.warnings, ...warnings],
-    );
+      // retrieveContext already folded in the installation warnings, so they
+      // are not added again here.
+      warnings: this.#installation.warnings,
+      raw: mergeTranscripts(this.#installation.adapter, transcripts),
+    });
   }
 
   async retrieveConstraints(

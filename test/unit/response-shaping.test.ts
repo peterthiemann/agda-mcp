@@ -51,16 +51,25 @@ function payload(result: unknown): Record<string, any> {
   return JSON.parse(content[0]?.text ?? "{}") as Record<string, any>;
 }
 
-test("the native event log is omitted unless the caller asks for it", async () => {
+test("the native event log ships by default and is dropped only on request", async () => {
   const harness = await connect();
   try {
-    const lean = payload(
+    const full = payload(
       await harness.client.callTool({
         name: "agda_load_module",
         arguments: { modulePath: MODULE_PATH },
       }),
     );
-    assert.equal(lean.raw.events, undefined, "events must not ship by default");
+    assert.equal(Array.isArray(full.raw.events), true, "events must ship by default");
+    assert.equal(full.raw.eventsOmitted, undefined);
+
+    const lean = payload(
+      await harness.client.callTool({
+        name: "agda_load_module",
+        arguments: { modulePath: MODULE_PATH, includeRaw: false },
+      }),
+    );
+    assert.equal(lean.raw.events, undefined, "includeRaw:false must drop events");
     assert.equal(lean.raw.eventsOmitted, true);
     assert.equal(typeof lean.raw.eventCount, "number");
     // The transcript metadata that describes truncation is still present.
@@ -71,21 +80,13 @@ test("the native event log is omitted unless the caller asks for it", async () =
     assert.equal(lean.data.checked, true);
     assert.equal(Array.isArray(lean.data.goals), true);
 
-    const full = payload(
-      await harness.client.callTool({
-        name: "agda_load_module",
-        arguments: { modulePath: MODULE_PATH, includeRaw: true },
-      }),
-    );
-    assert.equal(Array.isArray(full.raw.events), true);
-    assert.equal(full.raw.eventsOmitted, undefined);
     assert.equal(full.raw.events.length, lean.raw.eventCount);
   } finally {
     await harness.close();
   }
 });
 
-test("includeRawByDefault restores the previous full-transcript behaviour", async () => {
+test("includeRawByDefault:false makes omission the server-wide default", async () => {
   const service = await AgdaApplicationService.create(
     parseServerOptions({ workspaceRoots: [FIXTURE_ROOT], commandTimeoutMs: 2_000 }),
     {
@@ -98,7 +99,7 @@ test("includeRawByDefault restores the previous full-transcript behaviour", asyn
         }),
     },
   );
-  const server = createAgdaMcpServer(async () => service, undefined, 0, true);
+  const server = createAgdaMcpServer(async () => service, undefined, 0, false);
   const client = new Client({ name: "agda-mcp-raw-default", version: "1.0.0" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   try {
@@ -107,16 +108,16 @@ test("includeRawByDefault restores the previous full-transcript behaviour", asyn
     const result = payload(
       await client.callTool({ name: "agda_load_module", arguments: { modulePath: MODULE_PATH } }),
     );
-    assert.equal(Array.isArray(result.raw.events), true);
+    assert.equal(result.raw.events, undefined);
 
-    // A per-call false still wins over the server default.
+    // A per-call true still wins over the server default.
     const overridden = payload(
       await client.callTool({
         name: "agda_load_module",
-        arguments: { modulePath: MODULE_PATH, includeRaw: false },
+        arguments: { modulePath: MODULE_PATH, includeRaw: true },
       }),
     );
-    assert.equal(overridden.raw.events, undefined);
+    assert.equal(Array.isArray(overridden.raw.events), true);
   } finally {
     await client.close();
     await service.shutdown();

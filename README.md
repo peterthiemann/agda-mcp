@@ -84,19 +84,23 @@ Unknown fields and invalid limits are rejected before an Agda process starts.
 | `probeTimeoutMs` | Installation-probe timeout | `10000` |
 | `probeMaxBufferBytes` | Installation-probe output buffer | `1048576` |
 | `handleEntropyBytes` | Random bytes per workspace/goal/job handle (min `16`) | `24` |
-| `asyncMode` | `auto`, `never`, or `always`; see below | `auto` |
+| `asyncMode` | `never`, `auto`, or `always`; see below | `never` |
 | `deferAfterMs` | How long a tool call may block before deferring to a job | `2500` |
 | `maxJobWaitMs` | Ceiling on a single `agda_job_await` wait | `30000` |
 | `jobRetentionMs` | How long an uncollected finished job is kept | `300000` |
 | `maxTrackedJobs` | Maximum concurrently tracked jobs | `64` |
 | `progressIntervalMs` | Heartbeat for `notifications/progress` | `2000` |
-| `includeRawByDefault` | Ship Agda's native event log without asking | `false` |
+| `includeRawByDefault` | Ship Agda's native event log | `true` |
 
 ## Non-blocking operation
 
-Typechecking a large development can take minutes. Rather than hold the MCP
-request open for that whole time — which stalls the calling agent completely —
-any tool call that outruns `deferAfterMs` returns a job handle instead:
+Typechecking a large development can take minutes, and holding the MCP request
+open for that whole time stalls the calling agent completely.
+
+Deferral changes the shape of a successful tool response, so it is **opt-in**.
+Enable it globally with `asyncMode: "auto"`, or per call with `async: true` or
+`deferAfterMs`. With it enabled, a call that outruns `deferAfterMs` returns a
+job handle instead of blocking:
 
 ```json
 {
@@ -111,8 +115,9 @@ else, and the result is collected later with `agda_job_await`. Calls that
 finish inside the window return their result inline, exactly as before, so
 fast operations are unchanged.
 
-`asyncMode` controls the policy: `auto` (default) defers only slow calls,
-`never` restores fully synchronous behaviour, and `always` defers every call.
+`asyncMode` controls the policy: `never` (default) always blocks until Agda
+finishes, `auto` defers only calls slower than `deferAfterMs`, and `always`
+defers every call.
 
 ### Per-call overrides
 
@@ -193,18 +198,19 @@ reaching Agda.
 
 ## Response size
 
-Agda's native event log is the largest part of a response and is rarely useful
-to a caller, so `raw.events` is **omitted by default**. What remains is a
+Agda's native event log ships by default, as the normalized-plus-native-`raw`
+contract requires. Because it is the largest part of a response, `includeRaw:
+false` is offered as an opt-in optimization: it replaces `raw.events` with a
 summary — `eventsOmitted`, `eventCount`, byte counts, completeness, stderr — so
-truncation is still detectable:
+truncation stays detectable:
 
 ```json
 { "adapter": "agda-2.8.0", "eventsOmitted": true, "eventCount": 7,
   "capturedBytes": 812, "totalBytes": 812, "stderr": { "chunks": [] } }
 ```
 
-Pass `includeRaw: true` per call, or set `includeRawByDefault: true`, to get the
-full transcript back. A per-call value always wins over the server default.
+Set `includeRawByDefault: false` to make omission the server-wide default. A
+per-call `includeRaw` always wins over the server default.
 
 `diagnosticsOnly: true` further drops `goals` and `invisibleMetavariables` from
 a load or typecheck, leaving the verdict and diagnostics — useful for the common
@@ -222,8 +228,11 @@ goal, in request order:
 ```
 
 Agda still processes the goals one at a time — the interaction process is
-single-threaded — but the caller pays for one round trip instead of N, and one
-bad handle fails only its own entry.
+single-threaded — but the caller pays for one round trip instead of N. A
+per-goal problem (a stale handle, a rejected command) becomes that entry's
+error; an infrastructure failure or a cancellation aborts the whole batch
+rather than being misreported as one goal's fault. The returned `raw`
+transcript merges every command that ran.
 
 ## Non-mutating edit previews
 

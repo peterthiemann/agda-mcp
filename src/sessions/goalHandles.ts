@@ -1,4 +1,4 @@
-import { createHmac, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 
 import { DEFAULT_HANDLE_ENTROPY_BYTES } from "../application/config.js";
 import type { GoalHandle, SourceRange, WorkspaceHandle } from "../application/domain.js";
@@ -9,6 +9,13 @@ export interface GoalRecord {
   readonly workspace: WorkspaceHandle;
   readonly modulePath: string;
   readonly revision: number;
+  /**
+   * The load generation the handle was issued under. A generation covers one
+   * externally observable Agda state: it advances on every load, typecheck and
+   * recovery, and is preserved only across the internal restore reload that a
+   * transformation preview performs.
+   */
+  readonly generation: number;
   readonly sourceFingerprint: string;
   readonly interactionPoint: number;
   readonly range: SourceRange;
@@ -18,20 +25,17 @@ export interface GoalRecord {
 export interface CurrentGoalState {
   readonly workspace: WorkspaceHandle;
   readonly modulePath: string;
-  readonly revision: number;
+  readonly generation: number;
   readonly sourceFingerprint: string;
   readonly interactionPoints: ReadonlySet<number>;
 }
 
 export class GoalHandleTable {
   readonly #records = new Map<GoalHandle, GoalRecord>();
-  readonly #secret: Buffer;
-  readonly #digestBytes: number;
+  readonly #entropyBytes: number;
 
   constructor(entropyBytes: number = DEFAULT_HANDLE_ENTROPY_BYTES) {
-    // A per-session secret keeps deterministic handles unguessable from outside.
-    this.#secret = randomBytes(entropyBytes);
-    this.#digestBytes = entropyBytes;
+    this.#entropyBytes = entropyBytes;
   }
 
   get size(): number {
@@ -39,33 +43,33 @@ export class GoalHandleTable {
   }
 
   /**
-   * Handles are derived from the goal's identity rather than drawn at random,
-   * so reloading unchanged source reissues byte-identical handles. That keeps
-   * a caller's handles alive across the reload that case split, refine, and
-   * auto perform internally, and across a no-op typecheck.
+   * Handles are unguessable random tokens, never derived from goal content: a
+   * derived handle could be reconstructed after the table had deliberately
+   * dropped it, letting a handle come back to life after switching away from
+   * and back to a module.
    *
-   * The source fingerprint is part of the identity on purpose: once the file
-   * changes, Agda may renumber interaction points, so yesterday's handle must
-   * NOT silently resolve to a different hole.
+   * `preferredHandle` reissues an existing token for the same interaction
+   * point. It is used only by the internal restore reload of a transformation
+   * preview, which preserves the load generation.
    */
-  issue(record: GoalRecord): GoalHandle {
-    // The NUL separator cannot occur in a path or a hex fingerprint, so the
-    // joined parts can never be confused for one another.
-    const digest = createHmac("sha256", this.#secret)
-      .update(
-        [
-          record.workspace,
-          record.modulePath,
-          record.sourceFingerprint,
-          String(record.interactionPoint),
-        ].join("\u0000"),
-      )
-      .digest()
-      .subarray(0, this.#digestBytes)
-      .toString("base64url");
-    const handle: GoalHandle = `goal_${digest}`;
+  issue(record: GoalRecord, preferredHandle?: GoalHandle): GoalHandle {
+    let handle: GoalHandle;
+    if (preferredHandle !== undefined && !this.#records.has(preferredHandle)) {
+      handle = preferredHandle;
+    } else {
+      do {
+        handle = `goal_${randomBytes(this.#entropyBytes).toString("base64url")}`;
+      } while (this.#records.has(handle));
+    }
     this.#records.set(handle, Object.freeze({ ...record }));
     return handle;
+  }
+
+  /** Existing handles keyed by interaction point, for a preserving reload. */
+  handlesByInteractionPoint(): ReadonlyMap<number, GoalHandle> {
+    const byPoint = new Map<number, GoalHandle>();
+    for (const [handle, record] of this.#records) byPoint.set(record.interactionPoint, handle);
+    return byPoint;
   }
 
   validate(handle: GoalHandle, current: CurrentGoalState): GoalRecord {
@@ -74,6 +78,7 @@ export class GoalHandleTable {
       record === undefined ||
       record.workspace !== current.workspace ||
       record.modulePath !== current.modulePath ||
+      record.generation !== current.generation ||
       record.sourceFingerprint !== current.sourceFingerprint ||
       !current.interactionPoints.has(record.interactionPoint)
     ) {

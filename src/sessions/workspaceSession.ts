@@ -150,6 +150,10 @@ export class WorkspaceSession {
   #host: AgdaProcessHost;
   #lifecycle: WorkspaceSessionSummary["lifecycle"] = "starting";
   #revision = 0;
+  // Advances on every externally visible reload. Unlike the revision it is
+  // deliberately NOT advanced by the restore reload of a transformation
+  // preview, so a preview does not invalidate the caller's goal handles.
+  #generation = 0;
   #active: ActiveModuleState | undefined;
   #recoverable: ActiveModuleState | undefined;
   #terminating = false;
@@ -218,7 +222,7 @@ export class WorkspaceSession {
     return this.#goals.validate(handle, {
       workspace: this.handle,
       modulePath: active.plan.modulePath,
-      revision: this.#revision,
+      generation: this.#generation,
       sourceFingerprint: active.snapshot.fingerprint,
       interactionPoints: active.interactionPoints,
     });
@@ -343,7 +347,7 @@ export class WorkspaceSession {
       let restored: NormalizedResult<ModuleCheckResult>;
       try {
         if (!operationAttempted) throw operationError;
-        restored = await this.#loadNow(active.plan);
+        restored = await this.#loadNow(active.plan, {}, true);
       } catch (restoreError: unknown) {
         this.#active = undefined;
         this.#recoverable = undefined;
@@ -392,10 +396,15 @@ export class WorkspaceSession {
   async #loadNow(
     plan: ModuleDiscoveryPlan,
     options: SendCommandOptions = {},
+    preserveHandles = false,
   ): Promise<NormalizedResult<ModuleCheckResult>> {
     this.#ensureHost();
     this.#lifecycle = this.#host.state === "new" ? "starting" : "ready";
     const snapshot = await readSnapshot(plan.modulePath);
+    const previousHandles = preserveHandles
+      ? this.#goals.handlesByInteractionPoint()
+      : undefined;
+    const previousFingerprint = this.#active?.snapshot.fingerprint;
     this.#goals.revokeAll();
     const context: AgdaCommandContext = { currentFile: plan.modulePath };
     const protocol = await this.#host.sendCommand(
@@ -405,6 +414,11 @@ export class WorkspaceSession {
     );
     const normalized = normalizeLoadResponse(protocol.raw.events, snapshot.text, plan.modulePath);
     this.#revision += 1;
+    // Handles may only carry over when this reload restored byte-identical
+    // source; otherwise Agda may have renumbered the interaction points.
+    const carryHandles =
+      previousHandles !== undefined && previousFingerprint === snapshot.fingerprint;
+    if (!carryHandles) this.#generation += 1;
     const interactionPoints = new Set(normalized.goals.map((goal) => goal.interactionPoint));
     const goalHandles = new Map<number, string>();
     const goals: GoalSummary[] = normalized.goals.map((goal) => {
@@ -413,12 +427,16 @@ export class WorkspaceSession {
         workspace: this.handle,
         modulePath: plan.modulePath,
         revision: this.#revision,
+        generation: this.#generation,
         sourceFingerprint: snapshot.fingerprint,
         interactionPoint: goal.interactionPoint,
         range,
       };
       const nativeRange = protocolRange(plan.modulePath, snapshot.text, range);
-      const handle = this.#goals.issue({ ...partial, protocolRange: nativeRange });
+      const handle = this.#goals.issue(
+        { ...partial, protocolRange: nativeRange },
+        carryHandles ? previousHandles?.get(goal.interactionPoint) : undefined,
+      );
       goalHandles.set(goal.interactionPoint, handle);
       return Object.freeze({
         handle,

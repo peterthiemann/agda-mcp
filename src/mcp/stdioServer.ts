@@ -87,8 +87,8 @@ export function applicationErrorPayload(error: unknown) {
   });
 }
 
-function failedToolResult(error: unknown) {
-  const body = applicationErrorPayload(error);
+function failedToolResult(error: unknown, extra: Record<string, unknown> = {}) {
+  const body = { ...applicationErrorPayload(error), ...extra };
   return {
     isError: true,
     content: [{ type: "text" as const, text: JSON.stringify(body) }],
@@ -226,6 +226,8 @@ async function withProgress<T>(
       })
       .catch(() => undefined);
   }, intervalMs);
+  // Unref'd on purpose, unlike the timers in the job registry: nothing awaits
+  // this heartbeat, so it must never keep the process alive on its own.
   timer.unref?.();
   try {
     return await work;
@@ -628,7 +630,9 @@ export function createAgdaMcpServer(
           });
         }
         if (outcome.kind === "failed") {
-          return failedToolResult(outcome.error);
+          // The caller raced several jobs, so the error is useless without
+          // saying which one produced it.
+          return failedToolResult(outcome.error, { job: outcome.job });
         }
         return structuredToolResult({
           status: "completed",

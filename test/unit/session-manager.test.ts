@@ -22,7 +22,7 @@ const INSTALLATION: AgdaInstallation = Object.freeze({
   warnings: Object.freeze([]),
 });
 
-test("reloads bump the revision but keep goal handles stable for unchanged source", async () => {
+test("reloads keep workspace identity while rotating revisions and goal handles", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "agda-mcp-session-"));
   const modulePath = path.join(directory, "Tiny.agda");
   const source = await readFile("test/fixtures/agda-2.8.0/Tiny.agda");
@@ -45,27 +45,18 @@ test("reloads bump the revision but keep goal handles stable for unchanged sourc
     const checked = await manager.typecheck(loaded.data.workspace);
     assert.equal(checked.data.workspace, loaded.data.workspace);
     assert.equal(checked.data.revision, loaded.data.revision + 1);
-    // Same bytes on disk means the same holes, so the handle survives the reload.
-    assert.equal(checked.data.goals[0]?.handle, oldGoal);
-    assert.equal(
-      manager.require(loaded.data.workspace).resolveGoal(oldGoal as string).interactionPoint,
-      0,
+    // A reload starts a new load generation, so prior handles are revoked.
+    assert.notEqual(checked.data.goals[0]?.handle, oldGoal);
+    assert.throws(
+      () => manager.require(loaded.data.workspace).resolveGoal(oldGoal as string),
+      (error: unknown) =>
+        error instanceof ApplicationError && error.code === "STALE_GOAL_HANDLE",
     );
 
     await writeFile(modulePath, Buffer.concat([source, Buffer.from("\n-- changed\n")]));
     await assert.rejects(
       manager.require(loaded.data.workspace).assertSourceUnchanged(),
       (error: unknown) => error instanceof ApplicationError && error.code === "SOURCE_CHANGED",
-    );
-
-    // Safety: once the bytes change Agda may renumber interaction points, so a
-    // handle must NOT survive into the new revision.
-    const rechecked = await manager.typecheck(loaded.data.workspace);
-    assert.notEqual(rechecked.data.goals[0]?.handle, oldGoal);
-    assert.throws(
-      () => manager.require(loaded.data.workspace).resolveGoal(oldGoal as string),
-      (error: unknown) =>
-        error instanceof ApplicationError && error.code === "STALE_GOAL_HANDLE",
     );
   } finally {
     await manager.terminate();

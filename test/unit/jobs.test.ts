@@ -20,7 +20,7 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void; reje
 }
 
 test("fast operations settle inline and never occupy a job slot", async () => {
-  const registry = new JobRegistry<string>({ deferAfterMs: 1_000 });
+  const registry = new JobRegistry<string>({ asyncMode: "auto", deferAfterMs: 1_000 });
   const outcome = await registry.run("agda_typecheck", async () => "done");
 
   assert.equal(outcome.kind, "settled");
@@ -29,7 +29,7 @@ test("fast operations settle inline and never occupy a job slot", async () => {
 });
 
 test("slow operations defer instead of blocking the caller", async () => {
-  const registry = new JobRegistry<string>({ deferAfterMs: 10 });
+  const registry = new JobRegistry<string>({ asyncMode: "auto", deferAfterMs: 10 });
   const gate = deferred<string>();
 
   const outcome = await registry.run("agda_load_module", async () => gate.promise);
@@ -49,7 +49,7 @@ test("slow operations defer instead of blocking the caller", async () => {
 });
 
 test("awaiting a still-running job reports pending again rather than hanging", async () => {
-  const registry = new JobRegistry<string>({ deferAfterMs: 5, maxJobWaitMs: 20 });
+  const registry = new JobRegistry<string>({ asyncMode: "auto", deferAfterMs: 5, maxJobWaitMs: 20 });
   const gate = deferred<string>();
   const outcome = await registry.run("agda_auto", async () => gate.promise);
   const id = outcome.kind === "deferred" ? outcome.job.id : "";
@@ -62,7 +62,7 @@ test("awaiting a still-running job reports pending again rather than hanging", a
 });
 
 test("a deferred job survives the originating request being cancelled", async () => {
-  const registry = new JobRegistry<string>({ deferAfterMs: 5 });
+  const registry = new JobRegistry<string>({ asyncMode: "auto", deferAfterMs: 5 });
   const request = new AbortController();
   const gate = deferred<string>();
   let observedAbort = false;
@@ -89,7 +89,7 @@ test("a deferred job survives the originating request being cancelled", async ()
 });
 
 test("cancelling a job aborts the operation and reports it as cancelled", async () => {
-  const registry = new JobRegistry<string>({ deferAfterMs: 5 });
+  const registry = new JobRegistry<string>({ asyncMode: "auto", deferAfterMs: 5 });
   const gate = deferred<string>();
   const outcome = await registry.run("agda_auto", async (signal) => {
     signal.addEventListener("abort", () => gate.reject(new Error("aborted")));
@@ -102,7 +102,7 @@ test("cancelling a job aborts the operation and reports it as cancelled", async 
 });
 
 test("a failing deferred job surfaces its original error on collection", async () => {
-  const registry = new JobRegistry<string>({ deferAfterMs: 5 });
+  const registry = new JobRegistry<string>({ asyncMode: "auto", deferAfterMs: 5 });
   const gate = deferred<string>();
   const outcome = await registry.run("agda_typecheck", async () => gate.promise);
   const id = outcome.kind === "deferred" ? outcome.job.id : "";
@@ -140,7 +140,7 @@ test("asyncMode always defers even trivially fast operations", async () => {
 test("settled jobs are pruned once they age past the retention window", async () => {
   let now = 1_000;
   const registry = new JobRegistry<string>(
-    { deferAfterMs: 5, jobRetentionMs: 100 },
+    { asyncMode: "auto", deferAfterMs: 5, jobRetentionMs: 100 },
     () => now,
   );
   const gate = deferred<string>();
@@ -177,7 +177,7 @@ test("per-call overrides shadow the registry policy for one call only", async ()
 });
 
 test("a per-call defer window cannot exceed maxJobWaitMs", async () => {
-  const registry = new JobRegistry<string>({ deferAfterMs: 5, maxJobWaitMs: 50 });
+  const registry = new JobRegistry<string>({ asyncMode: "auto", deferAfterMs: 5, maxJobWaitMs: 50 });
   const gate = deferred<string>();
   const started = Date.now();
   // Asking for a 30s window must still be capped at maxJobWaitMs.
@@ -190,7 +190,7 @@ test("a per-call defer window cannot exceed maxJobWaitMs", async () => {
 });
 
 test("awaitAny returns the first job to finish and identifies it", async () => {
-  const registry = new JobRegistry<string>({ deferAfterMs: 5 });
+  const registry = new JobRegistry<string>({ asyncMode: "auto", deferAfterMs: 5 });
   const slow = deferred<string>();
   const fast = deferred<string>();
   const first = await registry.run("agda_load_module", async () => slow.promise);
@@ -211,7 +211,7 @@ test("awaitAny returns the first job to finish and identifies it", async () => {
 });
 
 test("awaitAny reports pending when nothing finishes in the window", async () => {
-  const registry = new JobRegistry<string>({ deferAfterMs: 5, maxJobWaitMs: 30 });
+  const registry = new JobRegistry<string>({ asyncMode: "auto", deferAfterMs: 5, maxJobWaitMs: 30 });
   const gate = deferred<string>();
   await registry.run("agda_auto", async () => gate.promise);
 
@@ -222,7 +222,7 @@ test("awaitAny reports pending when nothing finishes in the window", async () =>
 });
 
 test("awaitAny surfaces a failure with the job that produced it", async () => {
-  const registry = new JobRegistry<string>({ deferAfterMs: 5 });
+  const registry = new JobRegistry<string>({ asyncMode: "auto", deferAfterMs: 5 });
   const gate = deferred<string>();
   const started = await registry.run("agda_typecheck", async () => gate.promise);
   const id = started.kind === "deferred" ? started.job.id : "";
@@ -236,7 +236,7 @@ test("awaitAny surfaces a failure with the job that produced it", async () => {
 });
 
 test("settle listeners observe completions for out-of-band notification", async () => {
-  const registry = new JobRegistry<string>({ deferAfterMs: 5 });
+  const registry = new JobRegistry<string>({ asyncMode: "auto", deferAfterMs: 5 });
   const seen: string[] = [];
   const unsubscribe = registry.onSettled((job) => seen.push(`${job.tool}:${job.state}`));
 
