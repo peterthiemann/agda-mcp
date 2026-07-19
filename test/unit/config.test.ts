@@ -3,9 +3,13 @@ import test from "node:test";
 
 import {
   DEFAULT_COMMAND_TIMEOUT_MS,
+  DEFAULT_LOAD_TIMEOUT_MS,
+  DEFAULT_MAX_QUEUED_COMMANDS,
   DEFAULT_MAX_COMMAND_OUTPUT_BYTES,
+  DEFAULT_QUERY_TIMEOUT_MS,
   DEFAULT_RAW_RESPONSE_LIMIT_BYTES,
   DEFAULT_STDERR_RETURN_LIMIT_BYTES,
+  DEFAULT_TRANSFORMATION_TIMEOUT_MS,
   parseServerOptions,
 } from "../../src/application/config.js";
 import { ApplicationError } from "../../src/application/errors.js";
@@ -24,6 +28,10 @@ test("server options apply immutable security-conscious defaults", () => {
   assert.deepEqual(options.additionalFlags, []);
   assert.deepEqual(options.workspaceOverrides, []);
   assert.equal(options.commandTimeoutMs, DEFAULT_COMMAND_TIMEOUT_MS);
+  assert.equal(options.loadTimeoutMs, DEFAULT_LOAD_TIMEOUT_MS);
+  assert.equal(options.queryTimeoutMs, DEFAULT_QUERY_TIMEOUT_MS);
+  assert.equal(options.transformationTimeoutMs, DEFAULT_TRANSFORMATION_TIMEOUT_MS);
+  assert.equal(options.maxQueuedCommands, DEFAULT_MAX_QUEUED_COMMANDS);
   assert.equal(options.rawResponseLimitBytes, DEFAULT_RAW_RESPONSE_LIMIT_BYTES);
   assert.equal(options.stderrReturnLimitBytes, DEFAULT_STDERR_RETURN_LIMIT_BYTES);
   assert.equal(options.maxCommandOutputBytes, DEFAULT_MAX_COMMAND_OUTPUT_BYTES);
@@ -60,10 +68,31 @@ test("server options parse workspace-specific overrides", () => {
   assert.equal(Object.isFrozen(options.workspaceOverrides[0]), true);
 });
 
+test("legacy and operation-specific timeout options compose deterministically", () => {
+  const legacy = parseServerOptions({ commandTimeoutMs: 1_234 });
+  assert.equal(legacy.loadTimeoutMs, 1_234);
+  assert.equal(legacy.queryTimeoutMs, 1_234);
+  assert.equal(legacy.transformationTimeoutMs, 1_234);
+
+  const specific = parseServerOptions({
+    commandTimeoutMs: 1_234,
+    loadTimeoutMs: 2_000,
+    queryTimeoutMs: 3_000,
+    transformationTimeoutMs: 4_000,
+    maxQueuedCommands: 7,
+  });
+  assert.equal(specific.loadTimeoutMs, 2_000);
+  assert.equal(specific.queryTimeoutMs, 3_000);
+  assert.equal(specific.transformationTimeoutMs, 4_000);
+  assert.equal(specific.maxQueuedCommands, 7);
+});
+
 test("server options reject malformed and inconsistent limits", () => {
   assert.throws(() => parseServerOptions(null), isInvalidArgument);
   assert.throws(() => parseServerOptions({ unexpected: true }), isInvalidArgument);
   assert.throws(() => parseServerOptions({ commandTimeoutMs: 0 }), isInvalidArgument);
+  assert.throws(() => parseServerOptions({ loadTimeoutMs: 0 }), isInvalidArgument);
+  assert.throws(() => parseServerOptions({ maxQueuedCommands: 0 }), isInvalidArgument);
   assert.throws(() => parseServerOptions({ includePaths: [""] }), isInvalidArgument);
   assert.throws(
     () => parseServerOptions({ rawResponseLimitBytes: 2, maxCommandOutputBytes: 1 }),

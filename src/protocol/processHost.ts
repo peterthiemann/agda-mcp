@@ -25,6 +25,20 @@ export interface AgdaProcessHostOptions {
   readonly policy: ProcessOutputPolicy;
 }
 
+export type ProcessSpawner = (
+  executable: string,
+  arguments_: readonly string[],
+  options: {
+    readonly cwd: string;
+    readonly shell: false;
+    readonly stdio: ["pipe", "pipe", "pipe"];
+  },
+) => ChildProcessWithoutNullStreams;
+
+export interface AgdaProcessHostDependencies {
+  readonly spawnProcess?: ProcessSpawner;
+}
+
 export interface SendCommandOptions {
   readonly timeoutMs?: number;
   readonly signal?: AbortSignal;
@@ -70,6 +84,7 @@ function deferred<T>(): Deferred<T> {
 
 export class AgdaProcessHost {
   readonly #options: AgdaProcessHostOptions;
+  readonly #spawnProcess: ProcessSpawner;
   readonly #parser = new InteractionJsonStreamParser();
   readonly #exitListeners = new Set<(info: ProcessExitInfo) => void>();
   #state: HostState = "new";
@@ -81,8 +96,10 @@ export class AgdaProcessHost {
   #exitInfo: ProcessExitInfo | undefined;
   #startupOutputBytes = 0;
 
-  constructor(options: AgdaProcessHostOptions) {
+  constructor(options: AgdaProcessHostOptions, dependencies: AgdaProcessHostDependencies = {}) {
     this.#options = options;
+    this.#spawnProcess = dependencies.spawnProcess ?? ((executable, arguments_, spawnOptions) =>
+      spawn(executable, [...arguments_], spawnOptions));
   }
 
   get state(): HostState {
@@ -104,7 +121,7 @@ export class AgdaProcessHost {
     this.#startDeferred = deferred<void>();
     this.#exitDeferred = deferred<ProcessExitInfo>();
     try {
-      this.#child = spawn(this.#options.executable, [...this.#options.launchArguments], {
+      this.#child = this.#spawnProcess(this.#options.executable, this.#options.launchArguments, {
         cwd: this.#options.cwd,
         shell: false,
         stdio: ["pipe", "pipe", "pipe"],

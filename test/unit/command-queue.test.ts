@@ -50,3 +50,23 @@ test("a cancelled queued command never starts", async () => {
   );
   assert.equal(started, false);
 });
+
+test("the queue rejects requests beyond its configured memory bound", async () => {
+  const queue = new SerializedCommandQueue(2);
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const running = queue.enqueue(async () => blocked);
+  const queued = queue.enqueue(async () => 2);
+  await assert.rejects(
+    queue.enqueue(async () => 3),
+    (error: unknown) =>
+      error instanceof ApplicationError &&
+      error.code === "AGDA_COMMAND_REJECTED" &&
+      error.details.queueFull === true,
+  );
+  release();
+  await running;
+  assert.equal(await queued, 2);
+});

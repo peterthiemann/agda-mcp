@@ -82,6 +82,10 @@ flags: --safe --no-caching
     assert.deepEqual(plan.launchArguments, ["--interaction-json"]);
     assert.deepEqual(plan.commandPolicy, {
       commandTimeoutMs: 30_000,
+      loadTimeoutMs: 120_000,
+      queryTimeoutMs: 30_000,
+      transformationTimeoutMs: 60_000,
+      maxQueuedCommands: 64,
       rawResponseLimitBytes: 128 * 1024,
       stderrReturnLimitBytes: 32 * 1024,
       maxCommandOutputBytes: 16 * 1024 * 1024,

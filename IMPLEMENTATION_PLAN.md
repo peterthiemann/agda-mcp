@@ -1,6 +1,6 @@
 # Agda MCP Server: Implementation Plan
 
-Status: ready for implementation  
+Status: implemented
 Date: 2026-07-18  
 Source design: [DESIGN.md](./DESIGN.md)  
 Tested Agda baseline: 2.8.0
@@ -394,52 +394,52 @@ and MCP schema tests before proceeding to the next.
 
 ### 10.1 Cancellation and recovery
 
-- [ ] Apply the configured 120-second load, 30-second query, and 60-second
+- [x] Apply the configured 120-second load, 30-second query, and 60-second
   transformation timeout policies.
-- [ ] Attempt `Cmd_abort` for an active cancellation, then terminate after a
+- [x] Attempt `Cmd_abort` for an active cancellation, then terminate after a
   bounded grace period.
-- [ ] Restart lazily after unexpected exit and invalidate all affected handles.
-- [ ] Reload automatically only when the source fingerprint still matches.
-- [ ] Test cancellation before queue entry, while queued, and while active.
+- [x] Restart lazily after unexpected exit and invalidate all affected handles.
+- [x] Reload automatically only when the source fingerprint still matches.
+- [x] Test cancellation before queue entry, while queued, and while active.
 
 ### 10.2 Concurrency and lifecycle
 
-- [ ] Demonstrate FIFO command order inside one workspace.
-- [ ] Demonstrate concurrent progress across two workspaces.
-- [ ] Ensure MCP shutdown terminates all child processes cleanly.
-- [ ] Prevent orphan processes after startup failure or forced cancellation.
+- [x] Demonstrate FIFO command order inside one workspace.
+- [x] Demonstrate concurrent progress across two workspaces.
+- [x] Ensure MCP shutdown terminates all child processes cleanly.
+- [x] Prevent orphan processes after startup failure or forced cancellation.
 
 ### 10.3 Security hardening
 
-- [ ] Test canonical path containment against symlink traversal and replaced
+- [x] Test canonical path containment against symlink traversal and replaced
   symlinks.
-- [ ] Verify every child spawn uses an argument array and `shell: false`.
-- [ ] Confirm `--allow-exec` is blocked by default from every configuration
+- [x] Verify every child spawn uses an argument array and `shell: false`.
+- [x] Confirm `--allow-exec` is blocked by default from every configuration
   source.
-- [ ] Redact source contents and expressions from normal logs.
-- [ ] Bound queued request count and child output memory usage.
+- [x] Redact source contents and expressions from normal logs.
+- [x] Bound queued request count and child output memory usage.
 
 ### 10.4 Version compatibility behavior
 
-- [ ] Report exact 2.8.0 support in `agda_server_info` and load results.
-- [ ] Start unknown versions in `unverified` mode with a visible warning.
-- [ ] Convert command or required-shape incompatibility into
+- [x] Report exact 2.8.0 support in `agda_server_info` and load results.
+- [x] Start unknown versions in `unverified` mode with a visible warning.
+- [x] Convert command or required-shape incompatibility into
   `UNSUPPORTED_AGDA_PROTOCOL` while preserving raw evidence.
-- [ ] Add adapter-selection tests that do not require installing another Agda.
+- [x] Add adapter-selection tests that do not require installing another Agda.
 
 ### 10.5 Package and documentation
 
-- [ ] Document installation, `npx`/`npm exec` usage, MCP client configuration,
+- [x] Document installation, `npx`/`npm exec` usage, MCP client configuration,
   initialization options, workspace behavior, and all tools.
-- [ ] Document Agda/library rediscovery after upgrades and when a new adapter is
+- [x] Document Agda/library rediscovery after upgrades and when a new adapter is
   required.
-- [ ] Document non-mutating proposals and goal-handle invalidation after every
+- [x] Document non-mutating proposals and goal-handle invalidation after every
   preview.
-- [ ] Run `npm pack`, install the tarball into a fresh temporary directory, and
+- [x] Run `npm pack`, install the tarball into a fresh temporary directory, and
   invoke its `agda-mcp` executable.
-- [ ] Confirm the package contains compiled ESM and source maps as intended, but
+- [x] Confirm the package contains compiled ESM and source maps as intended, but
   no workspace fixtures or secrets.
-- [ ] Choose the final npm package name and repository license before publishing.
+- [x] Choose the final npm package name and repository license before publishing.
 
 ### 10.6 P7 acceptance gate
 

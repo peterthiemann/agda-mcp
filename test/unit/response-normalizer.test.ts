@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+import { ApplicationError } from "../../src/application/errors.js";
+
 import {
   normalizeConstraintsResponse,
   normalizeContextResponse,
@@ -130,4 +132,15 @@ test("invisible metas and structured constraints retain their published renderin
     source,
   );
   assert.deepEqual(constraints, [{ kind: "Unblock", rendered: "_x = value" }]);
+});
+
+test("required-shape incompatibility retains native events as evidence", () => {
+  const events = [{ kind: "FutureNormalForm", value: "x" }];
+  assert.throws(
+    () => normalizeExpressionResponse(events, "x"),
+    (error: unknown) =>
+      error instanceof ApplicationError &&
+      error.code === "UNSUPPORTED_AGDA_PROTOCOL" &&
+      error.details.events === events,
+  );
 });

@@ -14,6 +14,12 @@ export class SerializedCommandQueue {
   #running = false;
   #closed = false;
 
+  constructor(readonly maxPending: number = 64) {
+    if (!Number.isSafeInteger(maxPending) || maxPending <= 0) {
+      throw new ApplicationError("INVALID_ARGUMENT", "maxPending must be a positive safe integer");
+    }
+  }
+
   get pending(): number {
     return this.#entries.length + (this.#running ? 1 : 0);
   }
@@ -26,6 +32,13 @@ export class SerializedCommandQueue {
     }
     if (signal?.aborted === true) {
       return Promise.reject(cancelledBeforeStart());
+    }
+    if (this.pending >= this.maxPending) {
+      return Promise.reject(
+        new ApplicationError("AGDA_COMMAND_REJECTED", "Workspace command queue is full", {
+          details: { queueFull: true, maxPending: this.maxPending },
+        }),
+      );
     }
 
     return new Promise<T>((resolve, reject) => {

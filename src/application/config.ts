@@ -1,6 +1,10 @@
 import { ApplicationError } from "./errors.js";
 
 export const DEFAULT_COMMAND_TIMEOUT_MS = 30_000;
+export const DEFAULT_LOAD_TIMEOUT_MS = 120_000;
+export const DEFAULT_QUERY_TIMEOUT_MS = 30_000;
+export const DEFAULT_TRANSFORMATION_TIMEOUT_MS = 60_000;
+export const DEFAULT_MAX_QUEUED_COMMANDS = 64;
 export const DEFAULT_RAW_RESPONSE_LIMIT_BYTES = 128 * 1024;
 export const DEFAULT_STDERR_RETURN_LIMIT_BYTES = 32 * 1024;
 export const DEFAULT_MAX_COMMAND_OUTPUT_BYTES = 16 * 1024 * 1024;
@@ -22,6 +26,10 @@ export interface ServerOptions {
   readonly additionalFlags?: readonly string[];
   readonly workspaceOverrides?: readonly WorkspaceOverrideOptions[];
   readonly commandTimeoutMs?: number;
+  readonly loadTimeoutMs?: number;
+  readonly queryTimeoutMs?: number;
+  readonly transformationTimeoutMs?: number;
+  readonly maxQueuedCommands?: number;
   readonly rawResponseLimitBytes?: number;
   readonly stderrReturnLimitBytes?: number;
   readonly maxCommandOutputBytes?: number;
@@ -45,6 +53,10 @@ export interface ResolvedServerOptions {
   readonly additionalFlags: readonly string[];
   readonly workspaceOverrides: readonly ResolvedWorkspaceOverrideOptions[];
   readonly commandTimeoutMs: number;
+  readonly loadTimeoutMs: number;
+  readonly queryTimeoutMs: number;
+  readonly transformationTimeoutMs: number;
+  readonly maxQueuedCommands: number;
   readonly rawResponseLimitBytes: number;
   readonly stderrReturnLimitBytes: number;
   readonly maxCommandOutputBytes: number;
@@ -60,6 +72,10 @@ const SERVER_OPTION_KEYS = new Set([
   "additionalFlags",
   "workspaceOverrides",
   "commandTimeoutMs",
+  "loadTimeoutMs",
+  "queryTimeoutMs",
+  "transformationTimeoutMs",
+  "maxQueuedCommands",
   "rawResponseLimitBytes",
   "stderrReturnLimitBytes",
   "maxCommandOutputBytes",
@@ -219,6 +235,14 @@ export function parseServerOptions(input: unknown = {}): ResolvedServerOptions {
     invalid("stderrReturnLimitBytes cannot exceed maxCommandOutputBytes");
   }
 
+  const legacyTimeoutConfigured = input.commandTimeoutMs !== undefined;
+  const commandTimeoutMs = positiveInteger(
+    input,
+    "commandTimeoutMs",
+    DEFAULT_COMMAND_TIMEOUT_MS,
+    "options",
+  );
+
   const result: ResolvedServerOptions = {
     agdaExecutable,
     workspaceRoots: stringArray(input, "workspaceRoots", "options"),
@@ -226,10 +250,29 @@ export function parseServerOptions(input: unknown = {}): ResolvedServerOptions {
     libraries: stringArray(input, "libraries", "options"),
     additionalFlags,
     workspaceOverrides,
-    commandTimeoutMs: positiveInteger(
+    commandTimeoutMs,
+    loadTimeoutMs: positiveInteger(
       input,
-      "commandTimeoutMs",
-      DEFAULT_COMMAND_TIMEOUT_MS,
+      "loadTimeoutMs",
+      legacyTimeoutConfigured ? commandTimeoutMs : DEFAULT_LOAD_TIMEOUT_MS,
+      "options",
+    ),
+    queryTimeoutMs: positiveInteger(
+      input,
+      "queryTimeoutMs",
+      legacyTimeoutConfigured ? commandTimeoutMs : DEFAULT_QUERY_TIMEOUT_MS,
+      "options",
+    ),
+    transformationTimeoutMs: positiveInteger(
+      input,
+      "transformationTimeoutMs",
+      legacyTimeoutConfigured ? commandTimeoutMs : DEFAULT_TRANSFORMATION_TIMEOUT_MS,
+      "options",
+    ),
+    maxQueuedCommands: positiveInteger(
+      input,
+      "maxQueuedCommands",
+      DEFAULT_MAX_QUEUED_COMMANDS,
       "options",
     ),
     rawResponseLimitBytes,

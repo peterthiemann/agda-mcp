@@ -22,6 +22,10 @@ export interface EffectiveLoadConfiguration {
 
 export interface CommandOutputPolicy {
   readonly commandTimeoutMs: number;
+  readonly loadTimeoutMs: number;
+  readonly queryTimeoutMs: number;
+  readonly transformationTimeoutMs: number;
+  readonly maxQueuedCommands: number;
   readonly rawResponseLimitBytes: number;
   readonly stderrReturnLimitBytes: number;
   readonly maxCommandOutputBytes: number;
@@ -220,6 +224,10 @@ export async function discoverModulePlan(
     launchArguments: Object.freeze(["--interaction-json"]),
     commandPolicy: Object.freeze({
       commandTimeoutMs: options.commandTimeoutMs,
+      loadTimeoutMs: options.loadTimeoutMs,
+      queryTimeoutMs: options.queryTimeoutMs,
+      transformationTimeoutMs: options.transformationTimeoutMs,
+      maxQueuedCommands: options.maxQueuedCommands,
       rawResponseLimitBytes: options.rawResponseLimitBytes,
       stderrReturnLimitBytes: options.stderrReturnLimitBytes,
       maxCommandOutputBytes: options.maxCommandOutputBytes,

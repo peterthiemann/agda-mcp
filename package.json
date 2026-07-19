@@ -1,8 +1,7 @@
 {
   "name": "agda-mcp",
-  "version": "0.0.0-development",
+  "version": "0.1.0",
   "description": "A non-mutating MCP server for Agda's interaction protocol",
-  "private": true,
   "type": "module",
   "engines": {
     "node": ">=22"
@@ -24,6 +23,7 @@
     "test": "npm run test:compile && node scripts/run-tests.mjs unit",
     "test:fuzz": "npm run test:compile && node scripts/run-tests.mjs fuzz",
     "test:integration": "npm run test:compile && node scripts/run-tests.mjs integration",
+    "test:package": "node scripts/test-packed-install.mjs",
     "test:all": "npm run test:compile && node scripts/run-tests.mjs",
     "start": "node dist/index.js",
     "smoke": "node dist/index.js --help",
@@ -35,7 +35,15 @@
     "model-context-protocol",
     "theorem-proving"
   ],
-  "license": "UNLICENSED",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/peterthiemann/agda-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/peterthiemann/agda-mcp/issues"
+  },
+  "homepage": "https://github.com/peterthiemann/agda-mcp#readme",
   "sideEffects": false,
   "devDependencies": {
     "@types/node": "^22.20.1",

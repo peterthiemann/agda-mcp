@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import { open, realpath } from "node:fs/promises";
 
 import type {
   AgdaVersionInfo,
@@ -92,12 +93,30 @@ function versionInfo(installation: AgdaInstallation): AgdaVersionInfo {
 }
 
 async function readSnapshot(file: string): Promise<SourceSnapshot> {
-  const bytes = await readFile(file);
-  return Object.freeze({
-    bytes,
-    text: bytes.toString("utf8"),
-    fingerprint: createHash("sha256").update(bytes).digest("hex"),
-  });
+  const canonical = await realpath(file);
+  if (canonical !== file) {
+    throw new ApplicationError("PATH_OUTSIDE_WORKSPACE", "The active module path was replaced by a symlink", {
+      details: { modulePath: file, actualPath: canonical },
+    });
+  }
+  let handle;
+  try {
+    handle = await open(file, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+    const metadata = await handle.stat();
+    if (!metadata.isFile()) {
+      throw new ApplicationError("INVALID_ARGUMENT", "The active module is not a regular file", {
+        details: { modulePath: file },
+      });
+    }
+    const bytes = await handle.readFile();
+    return Object.freeze({
+      bytes,
+      text: bytes.toString("utf8"),
+      fingerprint: createHash("sha256").update(bytes).digest("hex"),
+    });
+  } finally {
+    await handle?.close();
+  }
 }
 
 function codePointPosition(text: string, utf16Offset: number): number {
@@ -124,38 +143,41 @@ export class WorkspaceSession {
   readonly handle: WorkspaceHandle;
   readonly root: string;
   readonly #adapter: AgdaProtocolAdapter;
-  readonly #queue = new SerializedCommandQueue();
+  readonly #queue: SerializedCommandQueue;
   readonly #goals = new GoalHandleTable();
-  readonly #host: AgdaProcessHost;
+  readonly #hostFactory: ProcessHostFactory;
+  readonly #hostOptions: AgdaProcessHostOptions;
+  #host: AgdaProcessHost;
   #lifecycle: WorkspaceSessionSummary["lifecycle"] = "starting";
   #revision = 0;
   #active: ActiveModuleState | undefined;
+  #recoverable: ActiveModuleState | undefined;
+  #terminating = false;
 
   constructor(options: WorkspaceSessionOptions) {
     this.handle = `workspace_${randomBytes(24).toString("base64url")}`;
     this.root = options.plan.projectRoot;
     this.#adapter = options.adapter;
-    const factory = options.processHostFactory ?? ((hostOptions) => new AgdaProcessHost(hostOptions));
-    this.#host = factory({
+    this.#queue = new SerializedCommandQueue(options.plan.commandPolicy.maxQueuedCommands);
+    this.#hostFactory = options.processHostFactory ?? ((hostOptions) => new AgdaProcessHost(hostOptions));
+    this.#hostOptions = {
       executable: options.plan.installation.executable,
       launchArguments: options.plan.launchArguments,
       cwd: options.plan.projectRoot,
       adapter: options.adapter,
       policy: options.plan.commandPolicy,
-    });
-    this.#host.onExit(() => {
-      this.#lifecycle = "stopped";
-      this.#goals.revokeAll();
-    });
+    };
+    this.#host = this.#createHost();
   }
 
   get summary(): WorkspaceSessionSummary {
+    const moduleState = this.#active ?? this.#recoverable;
     return Object.freeze({
       handle: this.handle,
       root: this.root,
       revision: this.#revision,
       lifecycle: this.#lifecycle,
-      ...(this.#active === undefined ? {} : { activeModule: this.#active.plan.modulePath }),
+      ...(moduleState === undefined ? {} : { activeModule: moduleState.plan.modulePath }),
     });
   }
 
@@ -179,7 +201,8 @@ export class WorkspaceSession {
     return this.#queue.enqueue(async () => {
       const active = this.#active;
       if (active === undefined) {
-        throw new ApplicationError("NO_ACTIVE_MODULE", "Workspace has no active module");
+        const recovered = await this.#recoverNow(signal);
+        return recovered.result;
       }
       return this.#loadNow(active.plan, signal);
     }, signal);
@@ -227,10 +250,13 @@ export class WorkspaceSession {
     options: SendCommandOptions = {},
   ): Promise<ProtocolCommandResult> {
     return this.#queue.enqueue(async () => {
-      const active = this.#active;
-      if (active === undefined) throw new ApplicationError("NO_ACTIVE_MODULE", "Workspace has no active module");
+      const active = await this.#activeNow(options.signal);
       await this.assertSourceUnchanged();
-      return this.#host.sendCommand(command, { currentFile: active.plan.modulePath }, options);
+      return this.#host.sendCommand(
+        command,
+        { currentFile: active.plan.modulePath },
+        sendOptions(options, active.plan.commandPolicy.queryTimeoutMs),
+      );
     }, options.signal);
   }
 
@@ -239,13 +265,12 @@ export class WorkspaceSession {
     options: SendCommandOptions = {},
   ): Promise<SessionQueryState> {
     return this.#queue.enqueue(async () => {
-      const active = this.#active;
-      if (active === undefined) throw new ApplicationError("NO_ACTIVE_MODULE", "Workspace has no active module");
+      const active = await this.#activeNow(options.signal);
       await this.assertSourceUnchanged();
       const protocol = await this.#host.sendCommand(
         command,
         { currentFile: active.plan.modulePath },
-        options,
+        sendOptions(options, active.plan.commandPolicy.queryTimeoutMs),
       );
       return this.#queryState(active, protocol);
     }, options.signal);
@@ -264,7 +289,7 @@ export class WorkspaceSession {
       const protocol = await this.#host.sendCommand(
         command(goal),
         { currentFile: active.plan.modulePath },
-        options,
+        sendOptions(options, active.plan.commandPolicy.queryTimeoutMs),
       );
       return Object.freeze({ ...this.#queryState(active, protocol), goal });
     }, options.signal);
@@ -293,7 +318,7 @@ export class WorkspaceSession {
         protocol = await this.#host.sendCommand(
           command(goal),
           { currentFile: active.plan.modulePath },
-          options,
+          sendOptions(options, active.plan.commandPolicy.transformationTimeoutMs),
         );
         const current = await readSnapshot(active.plan.modulePath);
         if (current.fingerprint !== active.snapshot.fingerprint) {
@@ -319,6 +344,7 @@ export class WorkspaceSession {
         restored = await this.#loadNow(active.plan);
       } catch (restoreError: unknown) {
         this.#active = undefined;
+        this.#recoverable = undefined;
         this.#goals.revokeAll();
         this.#lifecycle = "stopped";
         await this.#host.terminate().catch(() => undefined);
@@ -352,16 +378,20 @@ export class WorkspaceSession {
   }
 
   async terminate(): Promise<void> {
+    this.#terminating = true;
     this.#queue.close();
     this.#goals.revokeAll();
-    await this.#host.terminate();
+    this.#active = undefined;
+    this.#recoverable = undefined;
     this.#lifecycle = "stopped";
+    await this.#host.terminate();
   }
 
   async #loadNow(
     plan: ModuleDiscoveryPlan,
     signal?: AbortSignal,
   ): Promise<NormalizedResult<ModuleCheckResult>> {
+    this.#ensureHost();
     this.#lifecycle = this.#host.state === "new" ? "starting" : "ready";
     const snapshot = await readSnapshot(plan.modulePath);
     this.#goals.revokeAll();
@@ -370,7 +400,7 @@ export class WorkspaceSession {
       { kind: "load", modulePath: plan.modulePath, arguments: plan.load.arguments },
       context,
       {
-        timeoutMs: plan.commandPolicy.commandTimeoutMs,
+        timeoutMs: plan.commandPolicy.loadTimeoutMs,
         ...(signal === undefined ? {} : { signal }),
       },
     );
@@ -423,8 +453,47 @@ export class WorkspaceSession {
       goalHandles,
       result,
     });
+    this.#recoverable = undefined;
     this.#lifecycle = "ready";
     return result;
+  }
+
+  async #activeNow(signal?: AbortSignal): Promise<ActiveModuleState> {
+    return this.#active ?? this.#recoverNow(signal);
+  }
+
+  async #recoverNow(signal?: AbortSignal): Promise<ActiveModuleState> {
+    const recoverable = this.#recoverable;
+    if (recoverable === undefined) {
+      throw new ApplicationError("NO_ACTIVE_MODULE", "Workspace has no active module");
+    }
+    const current = await readSnapshot(recoverable.plan.modulePath);
+    if (current.fingerprint !== recoverable.snapshot.fingerprint) {
+      this.#recoverable = undefined;
+      this.#lifecycle = "stopped";
+      throw sourceChangedError(recoverable, current.fingerprint);
+    }
+    this.#ensureHost();
+    await this.#loadNow(recoverable.plan, signal);
+    return this.#active as ActiveModuleState;
+  }
+
+  #ensureHost(): void {
+    if (this.#host.state !== "stopped") return;
+    this.#host = this.#createHost();
+    this.#lifecycle = this.#recoverable === undefined ? "starting" : "recovering";
+  }
+
+  #createHost(): AgdaProcessHost {
+    const host = this.#hostFactory(this.#hostOptions);
+    host.onExit(() => {
+      if (this.#host !== host || this.#terminating) return;
+      if (this.#active !== undefined) this.#recoverable = this.#active;
+      this.#active = undefined;
+      this.#goals.revokeAll();
+      this.#lifecycle = this.#recoverable === undefined ? "stopped" : "recovering";
+    });
+    return host;
   }
 
   #queryState(active: ActiveModuleState, protocol: ProtocolCommandResult): SessionQueryState {
@@ -437,6 +506,13 @@ export class WorkspaceSession {
       protocol,
     });
   }
+}
+
+function sendOptions(options: SendCommandOptions, timeoutMs: number): SendCommandOptions {
+  return Object.freeze({
+    timeoutMs: options.timeoutMs ?? timeoutMs,
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
+  });
 }
 
 function sourceChangedError(active: ActiveModuleState, actualFingerprint: string): ApplicationError {

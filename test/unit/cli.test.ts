@@ -23,10 +23,10 @@ test("--help describes the supported source formats", async () => {
   assert.deepEqual(output.stderr, []);
 });
 
-test("--version prints the development version", async () => {
+test("--version prints the package version", async () => {
   const output = captureIo();
   assert.equal(await runCli(["--version"], output.io), 0);
-  assert.equal(output.stdout.join(""), "0.0.0-development\n");
+  assert.equal(output.stdout.join(""), "0.1.0\n");
   assert.deepEqual(output.stderr, []);
 });
 

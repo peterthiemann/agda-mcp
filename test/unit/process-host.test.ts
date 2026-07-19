@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import path from "node:path";
 import test from "node:test";
 
@@ -8,6 +9,7 @@ import { AgdaProcessHost, type ProcessOutputPolicy } from "../../src/protocol/pr
 
 const CONTEXT = { currentFile: "/workspace/Tiny.agda" } as const;
 const FAKE_AGDA = path.resolve("test/fixtures/process-host/fake-agda.mjs");
+const IGNORE_ABORT = path.resolve("test/fixtures/process-host/fake-agda-ignore-abort.mjs");
 
 function createHost(overrides: Partial<ProcessOutputPolicy> = {}): AgdaProcessHost {
   return new AgdaProcessHost({
@@ -154,6 +156,87 @@ test("the aggregate hard output limit also applies to stderr floods", async () =
     host.sendCommand({ kind: "computeTopLevel", expression: "stderr-flood" }, CONTEXT),
     errorCode("OUTPUT_LIMIT_EXCEEDED"),
   );
+  await host.terminate();
+  assert.equal(host.state, "stopped");
+});
+
+test("process spawning always uses an argument array with shell disabled", async () => {
+  let observed:
+    | { executable: string; arguments_: readonly string[]; shell: false; stdio: readonly string[] }
+    | undefined;
+  const host = new AgdaProcessHost(
+    {
+      executable: process.execPath,
+      launchArguments: [FAKE_AGDA],
+      cwd: process.cwd(),
+      adapter: agda280Adapter,
+      policy: {
+        commandTimeoutMs: 1_000,
+        rawResponseLimitBytes: 1_024,
+        stderrReturnLimitBytes: 1_024,
+        maxCommandOutputBytes: 4_096,
+      },
+    },
+    {
+      spawnProcess: (executable, arguments_, options) => {
+        observed = {
+          executable,
+          arguments_,
+          shell: options.shell,
+          stdio: options.stdio,
+        };
+        return spawn(executable, [...arguments_], options);
+      },
+    },
+  );
+  try {
+    await host.start();
+    assert.equal(observed?.executable, process.execPath);
+    assert.deepEqual(observed?.arguments_, [FAKE_AGDA]);
+    assert.equal(observed?.shell, false);
+    assert.deepEqual(observed?.stdio, ["pipe", "pipe", "pipe"]);
+  } finally {
+    await host.terminate();
+  }
+});
+
+test("startup timeout terminates a child that never publishes a prompt", async () => {
+  const host = new AgdaProcessHost({
+    executable: process.execPath,
+    launchArguments: ["-e", "setInterval(() => undefined, 1000)"],
+    cwd: process.cwd(),
+    adapter: agda280Adapter,
+    policy: {
+      commandTimeoutMs: 20,
+      rawResponseLimitBytes: 1_024,
+      stderrReturnLimitBytes: 1_024,
+      maxCommandOutputBytes: 4_096,
+    },
+  });
+  await assert.rejects(host.start(), errorCode("COMMAND_TIMEOUT"));
+  await host.terminate();
+  assert.equal(host.state, "stopped");
+});
+
+test("abort grace terminates an unresponsive active child", async () => {
+  const host = new AgdaProcessHost({
+    executable: process.execPath,
+    launchArguments: [IGNORE_ABORT],
+    cwd: process.cwd(),
+    adapter: agda280Adapter,
+    policy: {
+      commandTimeoutMs: 1_000,
+      rawResponseLimitBytes: 1_024,
+      stderrReturnLimitBytes: 1_024,
+      maxCommandOutputBytes: 4_096,
+      abortGraceMs: 20,
+    },
+  });
+  await host.start();
+  const controller = new AbortController();
+  const pending = host.sendCommand({ kind: "metas" }, CONTEXT, { signal: controller.signal });
+  controller.abort();
+  await assert.rejects(pending, errorCode("AGDA_COMMAND_REJECTED"));
   await host.terminate();
   assert.equal(host.state, "stopped");
 });
