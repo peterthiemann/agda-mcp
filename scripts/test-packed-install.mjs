@@ -12,6 +12,7 @@ const npmEnvironment = {
   ...process.env,
   npm_config_cache: path.join(temporary, "npm-cache"),
 };
+const sourcePackage = JSON.parse(await readFile(path.join(process.cwd(), "package.json"), "utf8"));
 
 try {
   const packed = await execFileAsync(
@@ -63,13 +64,13 @@ try {
     cwd: installDirectory,
     encoding: "utf8",
   });
-  assert.match(invoked.stdout, /agda-mcp 0\.1\.0/u);
+  assert.equal(invoked.stdout.startsWith(`agda-mcp ${sourcePackage.version}\n`), true);
 
   const installedPackage = JSON.parse(
     await readFile(path.join(installDirectory, "node_modules", "agda-mcp", "package.json"), "utf8"),
   );
   assert.equal(installedPackage.name, "agda-mcp");
-  assert.equal(installedPackage.version, "0.1.0");
+  assert.equal(installedPackage.version, sourcePackage.version);
   assert.equal(installedPackage.license, "MIT");
 } finally {
   await rm(temporary, { recursive: true, force: true });

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { runCli, type CliIo } from "../../src/cli.js";
+import { VERSION } from "../../src/version.js";
 
 function captureIo(): { io: CliIo; stdout: string[]; stderr: string[] } {
   const stdout: string[] = [];
@@ -26,7 +27,7 @@ test("--help describes the supported source formats", async () => {
 test("--version prints the package version", async () => {
   const output = captureIo();
   assert.equal(await runCli(["--version"], output.io), 0);
-  assert.equal(output.stdout.join(""), "0.1.0\n");
+  assert.equal(output.stdout.join(""), `${VERSION}\n`);
   assert.deepEqual(output.stderr, []);
 });
 
