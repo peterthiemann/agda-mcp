@@ -353,13 +353,14 @@ version before pushing the tag.
 
 ## Genesis and Codex involvement
 
-This project began as a design dialogue between Peter Thiemann and OpenAI
-Codex, operating as a GPT-5-based coding agent. Peter set the goals and made
-the consequential design choices: a standalone TypeScript server, one
-long-lived Agda interaction process per workspace, a transport-independent
-application API with stdio first, support for all three on-disk Agda source
-formats, opaque goal handles, normalized responses retaining native events,
-and non-mutating transformation previews with mandatory reload.
+This project began as a design dialogue between the project maintainer and
+OpenAI Codex, operating as a GPT-5-based coding agent. The maintainer set the
+goals and made the consequential design choices: a standalone TypeScript
+server, one long-lived Agda interaction process per workspace, a
+transport-independent application API with stdio first, support for all three
+on-disk Agda source formats, opaque goal handles, normalized responses
+retaining native events, and non-mutating transformation previews with
+mandatory reload.
 
 Codex turned that dialogue into the initial design and implementation plan,
 then implemented the repository in reviewed checkpoints. Its work included the
@@ -367,10 +368,10 @@ protocol codec and streaming parser, process/session management, the twelve MCP
 tools, literate-source edit planning, recovery and packaging, documentation,
 and the unit, integration, property-based, mutation-fuzz, live-Agda, and MCP
 stdio tests. Codex also staged, committed, pushed, and followed the CI results
-under Peter's explicit repository authorization. Peter remained the project
-owner and decision-maker throughout; this history records substantial
-AI-assisted design and implementation, not an OpenAI endorsement of the
-software.
+under the maintainer's explicit repository authorization. The maintainer
+remained the project owner and decision-maker throughout; this history records
+substantial AI-assisted design and implementation, not an OpenAI endorsement
+of the software.
 
 ## Design and license
 
