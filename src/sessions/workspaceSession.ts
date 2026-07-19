@@ -40,7 +40,21 @@ interface ActiveModuleState {
   readonly plan: ModuleDiscoveryPlan;
   readonly snapshot: SourceSnapshot;
   readonly interactionPoints: ReadonlySet<number>;
+  readonly goalHandles: ReadonlyMap<number, string>;
   readonly result: NormalizedResult<ModuleCheckResult>;
+}
+
+export interface SessionQueryState {
+  readonly workspace: WorkspaceHandle;
+  readonly modulePath: string;
+  readonly revision: number;
+  readonly sourceFingerprint: string;
+  readonly sourceText: string;
+  readonly protocol: ProtocolCommandResult;
+}
+
+export interface GoalSessionQueryState extends SessionQueryState {
+  readonly goal: GoalRecord;
 }
 
 export interface WorkspaceSessionOptions {
@@ -168,6 +182,14 @@ export class WorkspaceSession {
     });
   }
 
+  hasGoalHandle(handle: string): boolean {
+    return this.#goals.has(handle);
+  }
+
+  goalHandle(interactionPoint: number): string | undefined {
+    return this.#active?.goalHandles.get(interactionPoint);
+  }
+
   async assertSourceUnchanged(): Promise<void> {
     const active = this.#active;
     if (active === undefined) throw new ApplicationError("NO_ACTIVE_MODULE", "Workspace has no active module");
@@ -192,6 +214,42 @@ export class WorkspaceSession {
       if (active === undefined) throw new ApplicationError("NO_ACTIVE_MODULE", "Workspace has no active module");
       await this.assertSourceUnchanged();
       return this.#host.sendCommand(command, { currentFile: active.plan.modulePath }, options);
+    }, options.signal);
+  }
+
+  queryWorkspace(
+    command: AgdaCommand,
+    options: SendCommandOptions = {},
+  ): Promise<SessionQueryState> {
+    return this.#queue.enqueue(async () => {
+      const active = this.#active;
+      if (active === undefined) throw new ApplicationError("NO_ACTIVE_MODULE", "Workspace has no active module");
+      await this.assertSourceUnchanged();
+      const protocol = await this.#host.sendCommand(
+        command,
+        { currentFile: active.plan.modulePath },
+        options,
+      );
+      return this.#queryState(active, protocol);
+    }, options.signal);
+  }
+
+  queryGoal(
+    handle: string,
+    command: (goal: GoalRecord) => AgdaCommand,
+    options: SendCommandOptions = {},
+  ): Promise<GoalSessionQueryState> {
+    return this.#queue.enqueue(async () => {
+      const active = this.#active;
+      if (active === undefined) throw new ApplicationError("STALE_GOAL_HANDLE", "Workspace has no active goal state");
+      await this.assertSourceUnchanged();
+      const goal = this.resolveGoal(handle);
+      const protocol = await this.#host.sendCommand(
+        command(goal),
+        { currentFile: active.plan.modulePath },
+        options,
+      );
+      return Object.freeze({ ...this.#queryState(active, protocol), goal });
     }, options.signal);
   }
 
@@ -221,6 +279,7 @@ export class WorkspaceSession {
     const normalized = normalizeLoadResponse(protocol.raw.events, snapshot.text, plan.modulePath);
     this.#revision += 1;
     const interactionPoints = new Set(normalized.goals.map((goal) => goal.interactionPoint));
+    const goalHandles = new Map<number, string>();
     const goals: GoalSummary[] = normalized.goals.map((goal) => {
       const range = goal.range;
       const partial: Omit<GoalRecord, "protocolRange"> = {
@@ -232,8 +291,10 @@ export class WorkspaceSession {
         range,
       };
       const nativeRange = protocolRange(plan.modulePath, snapshot.text, range);
+      const handle = this.#goals.issue({ ...partial, protocolRange: nativeRange });
+      goalHandles.set(goal.interactionPoint, handle);
       return Object.freeze({
-        handle: this.#goals.issue({ ...partial, protocolRange: nativeRange }),
+        handle,
         range,
         type: goal.type,
       });
@@ -261,9 +322,21 @@ export class WorkspaceSession {
       plan,
       snapshot,
       interactionPoints,
+      goalHandles,
       result,
     });
     this.#lifecycle = "ready";
     return result;
+  }
+
+  #queryState(active: ActiveModuleState, protocol: ProtocolCommandResult): SessionQueryState {
+    return Object.freeze({
+      workspace: this.handle,
+      modulePath: active.plan.modulePath,
+      revision: this.#revision,
+      sourceFingerprint: active.snapshot.fingerprint,
+      sourceText: active.snapshot.text,
+      protocol,
+    });
   }
 }

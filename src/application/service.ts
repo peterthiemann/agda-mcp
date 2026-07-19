@@ -19,6 +19,8 @@ import type {
   RetrieveContextRequest,
   ServerInfo,
   WorkspaceRequest,
+  RewriteMode,
+  NormalizationMode,
 } from "./domain.js";
 import type { AgdaService } from "./agdaService.js";
 import type { ResolvedServerOptions } from "./config.js";
@@ -34,6 +36,27 @@ import {
   WorkspaceSessionManager,
   type WorkspaceSessionManagerOptions,
 } from "../sessions/sessionManager.js";
+import {
+  normalizeConstraintsResponse,
+  normalizeContextResponse,
+  normalizeExpressionResponse,
+  normalizeInferredTypeResponse,
+  normalizeMetasResponse,
+} from "../normalization/responses.js";
+
+const REWRITE_MODES = new Set<RewriteMode>([
+  "as_is",
+  "simplified",
+  "instantiated",
+  "normalised",
+  "head_normal",
+]);
+const NORMALIZATION_MODES = new Set<NormalizationMode>([
+  "default",
+  "ignore_abstract",
+  "head",
+  "use_show_instance",
+]);
 
 export interface AgdaApplicationServiceDependencies {
   readonly installation?: AgdaInstallation;
@@ -129,25 +152,69 @@ export class AgdaApplicationService implements AgdaService {
     return this.#sessions.typecheck(request.workspace, context?.signal);
   }
 
-  retrieveGoals(
-    _request: WorkspaceRequest,
-    _context?: OperationContext,
+  async retrieveGoals(
+    request: WorkspaceRequest,
+    context?: OperationContext,
   ): Promise<NormalizedResult<GoalsResult>> {
-    return notImplemented("agda_retrieve_goals");
+    const session = this.#sessions.require(request.workspace);
+    const query = await session.queryWorkspace(
+      { kind: "metas", rewrite: "as_is" },
+      signalOptions(context),
+    );
+    const normalized = normalizeMetasResponse(
+      query.protocol.raw.events,
+      query.sourceText,
+      query.modulePath,
+      (interactionPoint) => session.goalHandle(interactionPoint),
+    );
+    return Object.freeze({
+      data: Object.freeze({
+        workspace: request.workspace,
+        revision: query.revision,
+        goals: normalized.goals,
+      }),
+      warnings: Object.freeze([...this.#installation.warnings, ...normalized.warnings]),
+      raw: query.protocol.raw,
+    });
   }
 
-  retrieveContext(
-    _request: RetrieveContextRequest,
-    _context?: OperationContext,
+  async retrieveContext(
+    request: RetrieveContextRequest,
+    context?: OperationContext,
   ): Promise<NormalizedResult<ContextResult>> {
-    return notImplemented("agda_retrieve_context");
+    validateRewriteMode(request.rewrite);
+    const session = this.#sessions.requireGoal(request.goal);
+    const query = await session.queryGoal(
+      request.goal,
+      (goal) => ({
+        kind: "goalTypeContext",
+        interactionPoint: goal.interactionPoint,
+        range: goal.protocolRange,
+        ...(request.rewrite === undefined ? {} : { rewrite: request.rewrite }),
+      }),
+      signalOptions(context),
+    );
+    return result(
+      normalizeContextResponse(query.protocol.raw.events, request.goal),
+      query.protocol.raw,
+      this.#installation.warnings,
+    );
   }
 
-  retrieveConstraints(
-    _request: WorkspaceRequest,
-    _context?: OperationContext,
+  async retrieveConstraints(
+    request: WorkspaceRequest,
+    context?: OperationContext,
   ): Promise<NormalizedResult<ConstraintsResult>> {
-    return notImplemented("agda_retrieve_constraints");
+    const session = this.#sessions.require(request.workspace);
+    const query = await session.queryWorkspace({ kind: "constraints" }, signalOptions(context));
+    return result(
+      Object.freeze({
+        workspace: request.workspace,
+        constraints: normalizeConstraintsResponse(query.protocol.raw.events, query.sourceText),
+      }),
+      query.protocol.raw,
+      this.#installation.warnings,
+    );
   }
 
   caseSplit(
@@ -171,25 +238,111 @@ export class AgdaApplicationService implements AgdaService {
     return notImplemented("agda_auto");
   }
 
-  normalizeExpression(
-    _request: NormalizeExpressionRequest,
-    _context?: OperationContext,
+  async normalizeExpression(
+    request: NormalizeExpressionRequest,
+    context?: OperationContext,
   ): Promise<NormalizedResult<NormalizedExpressionResult>> {
-    return notImplemented("agda_normalize_expression");
+    const selector = validateExpressionSelector(request);
+    validateNormalizationMode(request.mode);
+    if (selector.kind === "workspace") {
+      const session = this.#sessions.require(selector.handle);
+      const query = await session.queryWorkspace(
+        {
+          kind: "computeTopLevel",
+          expression: request.expression,
+          ...(request.mode === undefined ? {} : { mode: request.mode }),
+        },
+        signalOptions(context),
+      );
+      return result(
+        normalizeExpressionResponse(query.protocol.raw.events, request.expression),
+        query.protocol.raw,
+        this.#installation.warnings,
+      );
+    }
+    const session = this.#sessions.requireGoal(selector.handle);
+    const query = await session.queryGoal(
+      selector.handle,
+      (goal) => ({
+        kind: "compute",
+        interactionPoint: goal.interactionPoint,
+        range: goal.protocolRange,
+        expression: request.expression,
+        ...(request.mode === undefined ? {} : { mode: request.mode }),
+      }),
+      signalOptions(context),
+    );
+    return result(
+      normalizeExpressionResponse(query.protocol.raw.events, request.expression),
+      query.protocol.raw,
+      this.#installation.warnings,
+    );
   }
 
-  inferType(
-    _request: InferTypeRequest,
-    _context?: OperationContext,
+  async inferType(
+    request: InferTypeRequest,
+    context?: OperationContext,
   ): Promise<NormalizedResult<InferredTypeResult>> {
-    return notImplemented("agda_infer_type");
+    const selector = validateExpressionSelector(request);
+    validateRewriteMode(request.rewrite);
+    if (selector.kind === "workspace") {
+      const session = this.#sessions.require(selector.handle);
+      const query = await session.queryWorkspace(
+        {
+          kind: "inferTopLevel",
+          expression: request.expression,
+          ...(request.rewrite === undefined ? {} : { rewrite: request.rewrite }),
+        },
+        signalOptions(context),
+      );
+      return result(
+        normalizeInferredTypeResponse(query.protocol.raw.events, request.expression),
+        query.protocol.raw,
+        this.#installation.warnings,
+      );
+    }
+    const session = this.#sessions.requireGoal(selector.handle);
+    const query = await session.queryGoal(
+      selector.handle,
+      (goal) => ({
+        kind: "infer",
+        interactionPoint: goal.interactionPoint,
+        range: goal.protocolRange,
+        expression: request.expression,
+        ...(request.rewrite === undefined ? {} : { rewrite: request.rewrite }),
+      }),
+      signalOptions(context),
+    );
+    return result(
+      normalizeInferredTypeResponse(query.protocol.raw.events, request.expression),
+      query.protocol.raw,
+      this.#installation.warnings,
+    );
   }
 
-  queryMetavariables(
-    _request: WorkspaceRequest,
-    _context?: OperationContext,
+  async queryMetavariables(
+    request: WorkspaceRequest,
+    context?: OperationContext,
   ): Promise<NormalizedResult<MetavariablesResult>> {
-    return notImplemented("agda_query_metavariables");
+    const session = this.#sessions.require(request.workspace);
+    const query = await session.queryWorkspace(
+      { kind: "metas", rewrite: "as_is" },
+      signalOptions(context),
+    );
+    const normalized = normalizeMetasResponse(
+      query.protocol.raw.events,
+      query.sourceText,
+      query.modulePath,
+      (interactionPoint) => session.goalHandle(interactionPoint),
+    );
+    return Object.freeze({
+      data: Object.freeze({
+        workspace: request.workspace,
+        metavariables: normalized.metavariables,
+      }),
+      warnings: Object.freeze([...this.#installation.warnings, ...normalized.warnings]),
+      raw: query.protocol.raw,
+    });
   }
 
   async shutdown(): Promise<void> {
@@ -203,4 +356,49 @@ function notImplemented<T>(tool: string): Promise<T> {
       details: { tool },
     }),
   );
+}
+
+function signalOptions(context: OperationContext | undefined): { signal?: AbortSignal } {
+  return context?.signal === undefined ? {} : { signal: context.signal };
+}
+
+function result<T>(
+  data: T,
+  raw: NormalizedResult<T>["raw"],
+  warnings: readonly string[],
+): NormalizedResult<T> {
+  return Object.freeze({ data, warnings: Object.freeze([...warnings]), raw });
+}
+
+function validateRewriteMode(mode: RewriteMode | undefined): void {
+  if (mode !== undefined && !REWRITE_MODES.has(mode)) {
+    throw new ApplicationError("INVALID_ARGUMENT", "Invalid rewrite mode", { details: { mode } });
+  }
+}
+
+function validateNormalizationMode(mode: NormalizationMode | undefined): void {
+  if (mode !== undefined && !NORMALIZATION_MODES.has(mode)) {
+    throw new ApplicationError("INVALID_ARGUMENT", "Invalid normalization mode", {
+      details: { mode },
+    });
+  }
+}
+
+export function validateExpressionSelector(
+  request: Pick<NormalizeExpressionRequest, "expression" | "workspace" | "goal">,
+): { readonly kind: "workspace" | "goal"; readonly handle: string } {
+  if (typeof request.expression !== "string" || request.expression.trim() === "") {
+    throw new ApplicationError("INVALID_ARGUMENT", "expression must be a non-empty string");
+  }
+  const workspace = typeof request.workspace === "string" && request.workspace.trim() !== "";
+  const goal = typeof request.goal === "string" && request.goal.trim() !== "";
+  if (workspace === goal) {
+    throw new ApplicationError(
+      "INVALID_ARGUMENT",
+      "Exactly one of workspace or goal must be provided",
+    );
+  }
+  return workspace
+    ? Object.freeze({ kind: "workspace", handle: request.workspace as string })
+    : Object.freeze({ kind: "goal", handle: request.goal as string });
 }

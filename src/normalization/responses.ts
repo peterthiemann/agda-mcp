@@ -1,6 +1,13 @@
 import type {
+  BoundarySummary,
+  ConstraintSummary,
+  ContextEntry,
+  ContextResult,
   Diagnostic,
+  GoalSummary,
+  InferredTypeResult,
   MetavariableSummary,
+  NormalizedExpressionResult,
   SourceRange,
 } from "../application/domain.js";
 import { ApplicationError } from "../application/errors.js";
@@ -17,6 +24,12 @@ export interface NormalizedLoadResponse {
   readonly diagnostics: readonly Diagnostic[];
   readonly goals: readonly NormalizedGoalDraft[];
   readonly invisibleMetavariables: readonly MetavariableSummary[];
+  readonly warnings: readonly string[];
+}
+
+export interface NormalizedMetasResponse {
+  readonly goals: readonly GoalSummary[];
+  readonly metavariables: readonly MetavariableSummary[];
   readonly warnings: readonly string[];
 }
 
@@ -154,4 +167,140 @@ export function normalizeLoadResponse(
     invisibleMetavariables: Object.freeze(invisibleMetavariables),
     warnings: Object.freeze(warnings),
   });
+}
+
+export function normalizeMetasResponse(
+  events: readonly unknown[],
+  source: string,
+  modulePath: string,
+  handleForInteractionPoint: (interactionPoint: number) => string | undefined,
+): NormalizedMetasResponse {
+  const load = normalizeLoadResponse(events, source, modulePath);
+  const goals = load.goals.map((goal) => {
+    const handle = handleForInteractionPoint(goal.interactionPoint);
+    if (handle === undefined) {
+      throw new ApplicationError(
+        "UNSUPPORTED_AGDA_PROTOCOL",
+        "Agda returned an interaction point outside the loaded goal state",
+        { details: { interactionPoint: goal.interactionPoint } },
+      );
+    }
+    return Object.freeze({ handle, range: goal.range, type: goal.type });
+  });
+  const visible: MetavariableSummary[] = goals.map((goal) =>
+    Object.freeze({
+      handle: goal.handle,
+      range: goal.range,
+      type: goal.type,
+      visibility: "visible",
+    }),
+  );
+  return Object.freeze({
+    goals: Object.freeze(goals),
+    metavariables: Object.freeze([...visible, ...load.invisibleMetavariables]),
+    warnings: load.warnings,
+  });
+}
+
+function displayInfo(events: readonly unknown[], kind: string): Record<string, unknown> | undefined {
+  for (const eventValue of events) {
+    const event = record(eventValue);
+    const info = event?.kind === "DisplayInfo" ? record(event.info) : undefined;
+    if (info?.kind === kind) return info;
+  }
+  return undefined;
+}
+
+function operationInfo(events: readonly unknown[], kind: string): Record<string, unknown> | undefined {
+  const direct = displayInfo(events, kind);
+  if (direct !== undefined) return direct;
+  const goalSpecific = displayInfo(events, "GoalSpecific");
+  const goalInfo = record(goalSpecific?.goalInfo);
+  return goalInfo?.kind === kind ? goalInfo : undefined;
+}
+
+function throwPublishedError(events: readonly unknown[], operation: string): never {
+  const error = displayInfo(events, "Error");
+  throw new ApplicationError(
+    error === undefined ? "UNSUPPORTED_AGDA_PROTOCOL" : "AGDA_COMMAND_REJECTED",
+    error === undefined
+      ? `Agda did not publish the required ${operation} response`
+      : rendered(error.error ?? error),
+    { details: { operation, events } },
+  );
+}
+
+export function normalizeContextResponse(
+  events: readonly unknown[],
+  goalHandle: string,
+): ContextResult {
+  const specific = displayInfo(events, "GoalSpecific");
+  const goalInfo = record(specific?.goalInfo);
+  if (goalInfo?.kind !== "GoalType") throwPublishedError(events, "goal context");
+  const entries: ContextEntry[] = (Array.isArray(goalInfo.entries) ? goalInfo.entries : []).map(
+    (value) => {
+      const entry = record(value);
+      if (entry === undefined) {
+        throw new ApplicationError("UNSUPPORTED_AGDA_PROTOCOL", "Agda context entry must be an object");
+      }
+      const reifiedName = rendered(entry.reifiedName ?? entry.originalName ?? "_");
+      const originalName = typeof entry.originalName === "string" ? entry.originalName : undefined;
+      return Object.freeze({
+        reifiedName,
+        type: rendered(entry.type ?? entry.binding ?? value),
+        inScope: entry.inScope !== false,
+        ...(originalName === undefined ? {} : { originalName }),
+      });
+    },
+  );
+  const boundaryValues = Array.isArray(goalInfo.boundary) ? goalInfo.boundary : [];
+  const boundary: BoundarySummary | undefined =
+    boundaryValues.length === 0
+      ? undefined
+      : Object.freeze({ rendered: boundaryValues.map(rendered).join("\n") });
+  return Object.freeze({
+    goal: goalHandle,
+    goalType: rendered(goalInfo.type),
+    context: Object.freeze(entries),
+    ...(boundary === undefined ? {} : { boundary }),
+  });
+}
+
+export function normalizeConstraintsResponse(
+  events: readonly unknown[],
+  source: string,
+): readonly ConstraintSummary[] {
+  const info = displayInfo(events, "Constraints");
+  if (info === undefined) throwPublishedError(events, "constraints");
+  const constraints = Array.isArray(info.constraints) ? info.constraints : [];
+  return Object.freeze(
+    constraints.map((value) => {
+      const object = record(value);
+      const range = rangeFrom(value, source);
+      const kind = typeof object?.kind === "string" ? object.kind : undefined;
+      return Object.freeze({
+        rendered: rendered(object?.constraint ?? object?.message ?? value),
+        ...(kind === undefined ? {} : { kind }),
+        ...(range === undefined ? {} : { range }),
+      });
+    }),
+  );
+}
+
+export function normalizeExpressionResponse(
+  events: readonly unknown[],
+  expression: string,
+): NormalizedExpressionResult {
+  const info = operationInfo(events, "NormalForm");
+  if (info === undefined) throwPublishedError(events, "normal form");
+  return Object.freeze({ expression, normalized: rendered(info.expr) });
+}
+
+export function normalizeInferredTypeResponse(
+  events: readonly unknown[],
+  expression: string,
+): InferredTypeResult {
+  const info = operationInfo(events, "InferredType");
+  if (info === undefined) throwPublishedError(events, "inferred type");
+  return Object.freeze({ expression, type: rendered(info.expr ?? info.type) });
 }

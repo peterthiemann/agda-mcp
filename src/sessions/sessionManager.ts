@@ -79,6 +79,15 @@ export class WorkspaceSessionManager {
     return session;
   }
 
+  requireGoal(goal: string): WorkspaceSession {
+    for (const session of this.#byRoot.values()) {
+      if (session.hasGoalHandle(goal)) return session;
+    }
+    throw new ApplicationError("STALE_GOAL_HANDLE", "Goal handle is stale or unknown", {
+      details: { goal },
+    });
+  }
+
   async terminate(): Promise<void> {
     await Promise.all([...this.#byRoot.values()].map((session) => session.terminate()));
     this.#byRoot.clear();

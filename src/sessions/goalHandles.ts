@@ -55,6 +55,10 @@ export class GoalHandleTable {
     return record;
   }
 
+  has(handle: GoalHandle): boolean {
+    return this.#records.has(handle);
+  }
+
   revokeAll(): void {
     this.#records.clear();
   }

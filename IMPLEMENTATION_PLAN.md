@@ -272,26 +272,26 @@ and MCP schema tests before proceeding to the next.
 
 ### 7.1 Goal and state queries
 
-- [ ] `agda_retrieve_goals`: send `Cmd_metas AsIs`, return actionable visible
+- [x] `agda_retrieve_goals`: send `Cmd_metas AsIs`, return actionable visible
   goals with handles.
-- [ ] `agda_query_metavariables`: project both visible and invisible metas from
+- [x] `agda_query_metavariables`: project both visible and invisible metas from
   the same command family.
-- [ ] `agda_retrieve_constraints`: normalize structured fields where present
+- [x] `agda_retrieve_constraints`: normalize structured fields where present
   and retain Agda's rendered form.
 
 ### 7.2 Goal-local queries
 
-- [ ] `agda_retrieve_context`: validate a goal handle and normalize ordered
+- [x] `agda_retrieve_context`: validate a goal handle and normalize ordered
   context, goal type, boundary, rewrite mode, and raw events.
-- [ ] Reject an invalid rewrite mode in the application layer before encoding.
+- [x] Reject an invalid rewrite mode in the application layer before encoding.
 
 ### 7.3 Expression queries
 
-- [ ] `agda_normalize_expression`: require exactly one workspace or goal
+- [x] `agda_normalize_expression`: require exactly one workspace or goal
   selector and map every normalization mode.
-- [ ] `agda_infer_type`: require exactly one workspace or goal selector and map
+- [x] `agda_infer_type`: require exactly one workspace or goal selector and map
   every rewrite mode.
-- [ ] Verify local expressions see goal-bound variables and top-level
+- [x] Verify local expressions see goal-bound variables and top-level
   expressions do not accidentally inherit a goal context.
 
 ### 7.4 P4 tests and gate

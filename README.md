@@ -8,7 +8,8 @@ The repository currently implements P0 through P3 of the
 [implementation plan](./IMPLEMENTATION_PLAN.md): package/discovery foundations,
 the Agda 2.8.0 protocol host, workspace sessions and opaque goal handles, and
 the first stdio MCP tools (`agda_server_info`, `agda_load_module`, and
-`agda_typecheck`).
+`agda_typecheck`). The transport-independent service also implements the P4
+goal, context, constraint, metavariable, normalization, and inference queries.
 
 ## Requirements
 
