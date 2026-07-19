@@ -30,11 +30,20 @@ test("--version prints the development version", async () => {
   assert.deepEqual(output.stderr, []);
 });
 
-test("the unfinished server path fails without polluting stdout", async () => {
+test("the default command starts the stdio server without polluting captured output", async () => {
   const output = captureIo();
-  assert.equal(await runCli([], output.io), 1);
+  let started = false;
+  assert.equal(
+    await runCli([], output.io, {
+      startServer: async () => {
+        started = true;
+      },
+    }),
+    0,
+  );
+  assert.equal(started, true);
   assert.deepEqual(output.stdout, []);
-  assert.match(output.stderr.join(""), /stdio MCP server/);
+  assert.deepEqual(output.stderr, []);
 });
 
 test("unknown arguments produce a usage error on stderr", async () => {

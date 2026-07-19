@@ -18,6 +18,51 @@ lines.on("line", (line) => {
     return;
   }
 
+  if (line.includes("Cmd_load")) {
+    respond([
+      { kind: "Status", status: { checked: false } },
+      {
+        info: {
+          errors: [],
+          invisibleGoals: [],
+          kind: "AllGoalsWarnings",
+          visibleGoals: [
+            {
+              constraintObj: {
+                id: 0,
+                range: [
+                  {
+                    start: { line: 4, col: 8, pos: 50 },
+                    end: { line: 4, col: 15, pos: 57 },
+                  },
+                ],
+              },
+              kind: "OfType",
+              type: "A",
+            },
+          ],
+          warnings: [],
+        },
+        kind: "DisplayInfo",
+      },
+      {
+        interactionPoints: [
+          {
+            id: 0,
+            range: [
+              {
+                start: { line: 4, col: 8, pos: 50 },
+                end: { line: 4, col: 15, pos: 57 },
+              },
+            ],
+          },
+        ],
+        kind: "InteractionPoints",
+      },
+    ]);
+    return;
+  }
+
   if (line.includes("Cmd_metas")) {
     pendingMetas = setTimeout(() => {
       pendingMetas = undefined;

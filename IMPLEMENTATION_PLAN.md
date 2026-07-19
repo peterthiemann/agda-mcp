@@ -220,38 +220,38 @@ format-independent portions of P5 can also proceed concurrently after P3.
 
 ### 6.1 Session state
 
-- [ ] Implement `WorkspaceSessionManager`, keyed by canonical project root.
-- [ ] Create workspace handles that remain stable for the MCP process lifetime.
-- [ ] Lazily start one Agda process per active workspace.
-- [ ] Implement a FIFO serialized command queue per workspace.
-- [ ] Store one active module path, source snapshot, SHA-256 fingerprint,
+- [x] Implement `WorkspaceSessionManager`, keyed by canonical project root.
+- [x] Create workspace handles that remain stable for the MCP process lifetime.
+- [x] Lazily start one Agda process per active workspace.
+- [x] Implement a FIFO serialized command queue per workspace.
+- [x] Store one active module path, source snapshot, SHA-256 fingerprint,
   revision, current goals, and lifecycle state.
-- [ ] Invalidate state cleanly when another module is loaded in the workspace.
+- [x] Invalidate state cleanly when another module is loaded in the workspace.
 
 ### 6.2 Goal handles
 
-- [ ] Create unguessable goal handles backed by a server-side table.
-- [ ] Bind each handle to workspace, module, revision, fingerprint,
+- [x] Create unguessable goal handles backed by a server-side table.
+- [x] Bind each handle to workspace, module, revision, fingerprint,
   interaction-point ID, and source range.
-- [ ] Reject stale or foreign handles before sending anything to Agda.
-- [ ] Revoke all goal handles on reload, module switch, recovery, and completed
+- [x] Reject stale or foreign handles before sending anything to Agda.
+- [x] Revoke all goal handles on reload, module switch, recovery, and completed
   transformation preview.
 
 ### 6.3 Load normalization
 
-- [ ] Normalize `Status`, `DisplayInfo`, `InteractionPoints`, warnings, errors,
+- [x] Normalize `Status`, `DisplayInfo`, `InteractionPoints`, warnings, errors,
   visible goals, and invisible metas from 2.8.0 events.
-- [ ] Convert Agda positions into 1-based line/column plus a zero-based UTF-16
+- [x] Convert Agda positions into 1-based line/column plus a zero-based UTF-16
   offset against the complete source snapshot.
-- [ ] Treat Agda type errors and unsolved goals as completed domain results.
-- [ ] Preserve every native event that fits the raw budget.
+- [x] Treat Agda type errors and unsolved goals as completed domain results.
+- [x] Preserve every native event that fits the raw budget.
 
 ### 6.4 First vertical MCP slice
 
-- [ ] Implement `agda_server_info` in the application service.
-- [ ] Implement `agda_load_module` with required absolute module path.
-- [ ] Implement `agda_typecheck` using the selected workspace handle.
-- [ ] Register these three tools in the stdio transport using thin schema and
+- [x] Implement `agda_server_info` in the application service.
+- [x] Implement `agda_load_module` with required absolute module path.
+- [x] Implement `agda_typecheck` using the selected workspace handle.
+- [x] Register these three tools in the stdio transport using thin schema and
   error adapters.
 
 ### 6.5 P3 tests and gate

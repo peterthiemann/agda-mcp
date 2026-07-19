@@ -4,11 +4,11 @@
 interaction protocol. It will support on-disk `.agda`, `.lagda`, and
 `.lagda.md` modules through a long-lived Agda subprocess per workspace.
 
-The repository currently contains the package foundation, transport-neutral
-domain and discovery layers, and the Agda 2.8.0 protocol/process host described
-by P0 through P2 of the [implementation plan](./IMPLEMENTATION_PLAN.md). The
-stdio MCP server and application-level session tools are implemented in later
-phases.
+The repository currently implements P0 through P3 of the
+[implementation plan](./IMPLEMENTATION_PLAN.md): package/discovery foundations,
+the Agda 2.8.0 protocol host, workspace sessions and opaque goal handles, and
+the first stdio MCP tools (`agda_server_info`, `agda_load_module`, and
+`agda_typecheck`).
 
 ## Requirements
 

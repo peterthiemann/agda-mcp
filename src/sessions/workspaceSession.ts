@@ -1,0 +1,269 @@
+import { createHash, randomBytes } from "node:crypto";
+import { readFile } from "node:fs/promises";
+
+import type {
+  AgdaVersionInfo,
+  GoalSummary,
+  ModuleCheckResult,
+  NormalizedResult,
+  WorkspaceHandle,
+  WorkspaceSessionSummary,
+} from "../application/domain.js";
+import { ApplicationError } from "../application/errors.js";
+import type { AgdaInstallation } from "../discovery/agdaInstallation.js";
+import type { ModuleDiscoveryPlan } from "../discovery/projectResolver.js";
+import { normalizeLoadResponse } from "../normalization/responses.js";
+import type {
+  AgdaCommand,
+  AgdaCommandContext,
+  AgdaProtocolAdapter,
+  AgdaProtocolRange,
+} from "../protocol/adapter.js";
+import {
+  AgdaProcessHost,
+  type AgdaProcessHostOptions,
+  type SendCommandOptions,
+} from "../protocol/processHost.js";
+import type { ProtocolCommandResult } from "../protocol/transcript.js";
+import { SerializedCommandQueue } from "./commandQueue.js";
+import { GoalHandleTable, type GoalRecord } from "./goalHandles.js";
+
+export type ProcessHostFactory = (options: AgdaProcessHostOptions) => AgdaProcessHost;
+
+interface SourceSnapshot {
+  readonly bytes: Buffer;
+  readonly text: string;
+  readonly fingerprint: string;
+}
+
+interface ActiveModuleState {
+  readonly plan: ModuleDiscoveryPlan;
+  readonly snapshot: SourceSnapshot;
+  readonly interactionPoints: ReadonlySet<number>;
+  readonly result: NormalizedResult<ModuleCheckResult>;
+}
+
+export interface WorkspaceSessionOptions {
+  readonly plan: ModuleDiscoveryPlan;
+  readonly adapter: AgdaProtocolAdapter;
+  readonly processHostFactory?: ProcessHostFactory;
+}
+
+function versionInfo(installation: AgdaInstallation): AgdaVersionInfo {
+  return Object.freeze({
+    executable: installation.executable,
+    version: installation.version,
+    applicationDirectory: installation.applicationDirectory,
+    dataDirectory: installation.dataDirectory,
+    adapter: installation.adapter,
+    compatibility: installation.compatibility,
+  });
+}
+
+async function readSnapshot(file: string): Promise<SourceSnapshot> {
+  const bytes = await readFile(file);
+  return Object.freeze({
+    bytes,
+    text: bytes.toString("utf8"),
+    fingerprint: createHash("sha256").update(bytes).digest("hex"),
+  });
+}
+
+function codePointPosition(text: string, utf16Offset: number): number {
+  return [...text.slice(0, utf16Offset)].length + 1;
+}
+
+function protocolRange(file: string, source: string, range: GoalSummary["range"]): AgdaProtocolRange {
+  return Object.freeze({
+    file,
+    start: Object.freeze({
+      offset: codePointPosition(source, range.start.utf16Offset),
+      line: range.start.line,
+      column: range.start.column,
+    }),
+    end: Object.freeze({
+      offset: codePointPosition(source, range.end.utf16Offset),
+      line: range.end.line,
+      column: range.end.column,
+    }),
+  });
+}
+
+export class WorkspaceSession {
+  readonly handle: WorkspaceHandle;
+  readonly root: string;
+  readonly #adapter: AgdaProtocolAdapter;
+  readonly #queue = new SerializedCommandQueue();
+  readonly #goals = new GoalHandleTable();
+  readonly #host: AgdaProcessHost;
+  #lifecycle: WorkspaceSessionSummary["lifecycle"] = "starting";
+  #revision = 0;
+  #active: ActiveModuleState | undefined;
+
+  constructor(options: WorkspaceSessionOptions) {
+    this.handle = `workspace_${randomBytes(24).toString("base64url")}`;
+    this.root = options.plan.projectRoot;
+    this.#adapter = options.adapter;
+    const factory = options.processHostFactory ?? ((hostOptions) => new AgdaProcessHost(hostOptions));
+    this.#host = factory({
+      executable: options.plan.installation.executable,
+      launchArguments: options.plan.launchArguments,
+      cwd: options.plan.projectRoot,
+      adapter: options.adapter,
+      policy: options.plan.commandPolicy,
+    });
+    this.#host.onExit(() => {
+      this.#lifecycle = "stopped";
+      this.#goals.revokeAll();
+    });
+  }
+
+  get summary(): WorkspaceSessionSummary {
+    return Object.freeze({
+      handle: this.handle,
+      root: this.root,
+      revision: this.#revision,
+      lifecycle: this.#lifecycle,
+      ...(this.#active === undefined ? {} : { activeModule: this.#active.plan.modulePath }),
+    });
+  }
+
+  get activeResult(): NormalizedResult<ModuleCheckResult> | undefined {
+    return this.#active?.result;
+  }
+
+  load(
+    plan: ModuleDiscoveryPlan,
+    signal?: AbortSignal,
+  ): Promise<NormalizedResult<ModuleCheckResult>> {
+    if (plan.projectRoot !== this.root) {
+      return Promise.reject(
+        new ApplicationError("UNKNOWN_WORKSPACE", "Module plan belongs to another workspace session"),
+      );
+    }
+    return this.#queue.enqueue(() => this.#loadNow(plan, signal), signal);
+  }
+
+  typecheck(signal?: AbortSignal): Promise<NormalizedResult<ModuleCheckResult>> {
+    return this.#queue.enqueue(async () => {
+      const active = this.#active;
+      if (active === undefined) {
+        throw new ApplicationError("NO_ACTIVE_MODULE", "Workspace has no active module");
+      }
+      return this.#loadNow(active.plan, signal);
+    }, signal);
+  }
+
+  resolveGoal(handle: string): GoalRecord {
+    const active = this.#active;
+    if (active === undefined) {
+      throw new ApplicationError("STALE_GOAL_HANDLE", "Workspace has no active goal state");
+    }
+    return this.#goals.validate(handle, {
+      workspace: this.handle,
+      modulePath: active.plan.modulePath,
+      revision: this.#revision,
+      sourceFingerprint: active.snapshot.fingerprint,
+      interactionPoints: active.interactionPoints,
+    });
+  }
+
+  async assertSourceUnchanged(): Promise<void> {
+    const active = this.#active;
+    if (active === undefined) throw new ApplicationError("NO_ACTIVE_MODULE", "Workspace has no active module");
+    const current = await readSnapshot(active.plan.modulePath);
+    if (current.fingerprint !== active.snapshot.fingerprint) {
+      throw new ApplicationError("SOURCE_CHANGED", "The active Agda source changed on disk", {
+        details: {
+          modulePath: active.plan.modulePath,
+          expectedSourceFingerprint: active.snapshot.fingerprint,
+          actualSourceFingerprint: current.fingerprint,
+        },
+      });
+    }
+  }
+
+  runCommand(
+    command: AgdaCommand,
+    options: SendCommandOptions = {},
+  ): Promise<ProtocolCommandResult> {
+    return this.#queue.enqueue(async () => {
+      const active = this.#active;
+      if (active === undefined) throw new ApplicationError("NO_ACTIVE_MODULE", "Workspace has no active module");
+      await this.assertSourceUnchanged();
+      return this.#host.sendCommand(command, { currentFile: active.plan.modulePath }, options);
+    }, options.signal);
+  }
+
+  async terminate(): Promise<void> {
+    this.#queue.close();
+    this.#goals.revokeAll();
+    await this.#host.terminate();
+    this.#lifecycle = "stopped";
+  }
+
+  async #loadNow(
+    plan: ModuleDiscoveryPlan,
+    signal?: AbortSignal,
+  ): Promise<NormalizedResult<ModuleCheckResult>> {
+    this.#lifecycle = this.#host.state === "new" ? "starting" : "ready";
+    const snapshot = await readSnapshot(plan.modulePath);
+    this.#goals.revokeAll();
+    const context: AgdaCommandContext = { currentFile: plan.modulePath };
+    const protocol = await this.#host.sendCommand(
+      { kind: "load", modulePath: plan.modulePath, arguments: plan.load.arguments },
+      context,
+      {
+        timeoutMs: plan.commandPolicy.commandTimeoutMs,
+        ...(signal === undefined ? {} : { signal }),
+      },
+    );
+    const normalized = normalizeLoadResponse(protocol.raw.events, snapshot.text, plan.modulePath);
+    this.#revision += 1;
+    const interactionPoints = new Set(normalized.goals.map((goal) => goal.interactionPoint));
+    const goals: GoalSummary[] = normalized.goals.map((goal) => {
+      const range = goal.range;
+      const partial: Omit<GoalRecord, "protocolRange"> = {
+        workspace: this.handle,
+        modulePath: plan.modulePath,
+        revision: this.#revision,
+        sourceFingerprint: snapshot.fingerprint,
+        interactionPoint: goal.interactionPoint,
+        range,
+      };
+      const nativeRange = protocolRange(plan.modulePath, snapshot.text, range);
+      return Object.freeze({
+        handle: this.#goals.issue({ ...partial, protocolRange: nativeRange }),
+        range,
+        type: goal.type,
+      });
+    });
+    const data: ModuleCheckResult = Object.freeze({
+      workspace: this.handle,
+      workspaceRoot: plan.workspaceRoot,
+      projectRoot: plan.projectRoot,
+      modulePath: plan.modulePath,
+      sourceFormat: plan.sourceFormat,
+      revision: this.#revision,
+      sourceFingerprint: snapshot.fingerprint,
+      checked: normalized.checked,
+      diagnostics: normalized.diagnostics,
+      goals: Object.freeze(goals),
+      invisibleMetavariables: normalized.invisibleMetavariables,
+      agda: versionInfo(plan.installation),
+    });
+    const result: NormalizedResult<ModuleCheckResult> = Object.freeze({
+      data,
+      warnings: Object.freeze([...plan.installation.warnings, ...normalized.warnings]),
+      raw: protocol.raw,
+    });
+    this.#active = Object.freeze({
+      plan,
+      snapshot,
+      interactionPoints,
+      result,
+    });
+    this.#lifecycle = "ready";
+    return result;
+  }
+}

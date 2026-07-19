@@ -1,4 +1,5 @@
 import { VERSION } from "./version.js";
+import { runStdioServer } from "./mcp/stdioServer.js";
 
 export interface CliWriter {
   write(chunk: string): void;
@@ -12,7 +13,9 @@ export interface CliIo {
 const HELP_TEXT = `agda-mcp ${VERSION}
 
 Usage:
-  agda-mcp [--help | --version]
+  agda-mcp
+  agda-mcp --help
+  agda-mcp --version
 
 Agda MCP server for on-disk .agda, .lagda, and .lagda.md modules.
 
@@ -21,7 +24,15 @@ Options:
   -V, --version  Show the package version
 `;
 
-export async function runCli(args: readonly string[], io: CliIo): Promise<number> {
+export interface CliDependencies {
+  readonly startServer?: () => Promise<void>;
+}
+
+export async function runCli(
+  args: readonly string[],
+  io: CliIo,
+  dependencies: CliDependencies = {},
+): Promise<number> {
   if (args.length === 1 && (args[0] === "--help" || args[0] === "-h")) {
     io.stdout.write(HELP_TEXT);
     return 0;
@@ -38,8 +49,6 @@ export async function runCli(args: readonly string[], io: CliIo): Promise<number
     return 2;
   }
 
-  io.stderr.write(
-    "agda-mcp: the stdio MCP server will be enabled in the session/load implementation phase.\n",
-  );
-  return 1;
+  await (dependencies.startServer ?? runStdioServer)();
+  return 0;
 }
