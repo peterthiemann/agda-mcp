@@ -260,12 +260,30 @@ not see or provide bare Agda interaction-point IDs. A handle is valid only when:
 
 - its workspace session still exists;
 - its module is still the active module;
-- its revision equals the current revision;
 - the source fingerprint still matches; and
 - its interaction point is still present.
 
-Loading another module, reloading, recovering a process, or completing a
-transformation preview invalidates all existing handles. Stale use fails with
+Handles are derived deterministically, by HMAC over the workspace, module path,
+source fingerprint, and interaction point, keyed with a per-session secret. Two
+consequences follow.
+
+Reloading identical bytes reissues byte-identical handles, so a handle survives
+a plain `typecheck`, a process recovery, and the internal restore reload that
+case split, refine, and auto perform. This removes the round trip that would
+otherwise be needed to re-fetch goals after every preview.
+
+A change to the source changes the fingerprint and therefore every handle for
+that module. This is the safety property that matters: once the bytes change,
+Agda may renumber interaction points, so an old handle must never silently
+resolve to a different hole. It fails with `STALE_GOAL_HANDLE` instead.
+
+Note that the revision is deliberately *not* part of the validity test. Given an
+identical fingerprint and a live interaction point, revision equality adds no
+correctness guarantee — interaction-point numbering is a function of the source
+text — while costing every caller its handles on each reload.
+
+Loading another module still invalidates the previous module's handles, since
+the module path is part of the derivation. Stale use fails with
 `STALE_GOAL_HANDLE` and does not reach Agda.
 
 ### 8.3 External source changes

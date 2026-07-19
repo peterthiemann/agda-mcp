@@ -41,7 +41,7 @@ async function fixture(fake: string = FAKE_AGDA) {
   return { directory, modulePath, service };
 }
 
-test("transformation previews preserve bytes, restore state, and rotate handles", async () => {
+test("transformation previews preserve bytes, restore state, and keep handles usable", async () => {
   const testFixture = await fixture();
   try {
     const before = await readFile(testFixture.modulePath);
@@ -53,13 +53,12 @@ test("transformation previews preserve bytes, restore state, and rotate handles"
     assert.equal(preview.data.restoredRevision, loaded.data.revision + 1);
     assert.equal(preview.data.edits[0]?.replacement, "x");
     assert.equal(preview.data.edits[0]?.expectedSourceFingerprint, loaded.data.sourceFingerprint);
-    assert.notEqual(preview.data.goals[0]?.handle, goal);
+    // The preview restored identical bytes, so the caller's handle is still good.
+    assert.equal(preview.data.goals[0]?.handle, goal);
     assert.notEqual(preview.raw.restore, undefined);
     assert.equal(preview.raw.events.some((event) => (event as { kind?: unknown }).kind === "GiveAction"), true);
-    await assert.rejects(
-      testFixture.service.refine({ goal: goal as string }),
-      (error: unknown) => error instanceof ApplicationError && error.code === "STALE_GOAL_HANDLE",
-    );
+    const reused = await testFixture.service.refine({ goal: goal as string });
+    assert.equal(reused.data.goals[0]?.handle, goal);
 
     const restoredGoal = preview.data.goals[0]?.handle;
     assert.notEqual(restoredGoal, undefined);
@@ -78,7 +77,7 @@ test("transformation previews preserve bytes, restore state, and rotate handles"
   }
 });
 
-test("a rejected proposal still reloads and rotates the goal state", async () => {
+test("a rejected proposal still reloads and leaves the goal handle usable", async () => {
   const testFixture = await fixture();
   try {
     const before = await readFile(testFixture.modulePath);
@@ -90,13 +89,12 @@ test("a rejected proposal still reloads and rotates the goal state", async () =>
       (error: unknown) => error instanceof ApplicationError && error.code === "AGDA_COMMAND_REJECTED",
     );
     assert.deepEqual(await readFile(testFixture.modulePath), before);
-    await assert.rejects(
-      testFixture.service.auto({ goal: goal as string }),
-      (error: unknown) => error instanceof ApplicationError && error.code === "STALE_GOAL_HANDLE",
-    );
     const info = await testFixture.service.serverInfo();
     assert.equal(info.data.workspaces[0]?.revision, loaded.data.revision + 1);
     assert.equal(info.data.workspaces[0]?.lifecycle, "ready");
+    // The reload after rejection reissues the same handle, so retrying is free.
+    const retried = await testFixture.service.auto({ goal: goal as string });
+    assert.equal(retried.data.goals[0]?.handle, goal);
   } finally {
     await testFixture.service.shutdown();
     await rm(testFixture.directory, { recursive: true, force: true });
@@ -116,6 +114,7 @@ test("a source change during preview rejects the proposal after restoring curren
       pending,
       (error: unknown) => error instanceof ApplicationError && error.code === "SOURCE_CHANGED",
     );
+    // The bytes on disk changed, so the pre-change handle must NOT come back.
     await assert.rejects(
       testFixture.service.auto({ goal: goal as string }),
       (error: unknown) => error instanceof ApplicationError && error.code === "STALE_GOAL_HANDLE",

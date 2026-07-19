@@ -4,6 +4,8 @@ import type {
   CaseSplitRequest,
   ConstraintsResult,
   ContextResult,
+  ContextsEntry,
+  ContextsResult,
   EditPreviewResult,
   GoalsResult,
   InferTypeRequest,
@@ -17,6 +19,7 @@ import type {
   OperationContext,
   RefineRequest,
   RetrieveContextRequest,
+  RetrieveContextsRequest,
   ServerInfo,
   WorkspaceRequest,
   RewriteMode,
@@ -91,6 +94,11 @@ export class AgdaApplicationService implements AgdaService {
   readonly #installation: AgdaInstallation;
   readonly #sessions: WorkspaceSessionManager;
 
+  /** The fully resolved configuration this service was created with. */
+  get options(): ResolvedServerOptions {
+    return this.#options;
+  }
+
   private constructor(
     options: ResolvedServerOptions,
     installation: AgdaInstallation,
@@ -147,14 +155,14 @@ export class AgdaApplicationService implements AgdaService {
     request: LoadModuleRequest,
     context?: OperationContext,
   ): Promise<NormalizedResult<ModuleCheckResult>> {
-    return this.#sessions.loadModule(request.modulePath, context?.signal);
+    return this.#sessions.loadModule(request.modulePath, signalOptions(context));
   }
 
   typecheck(
     request: WorkspaceRequest,
     context?: OperationContext,
   ): Promise<NormalizedResult<ModuleCheckResult>> {
-    return this.#sessions.typecheck(request.workspace, context?.signal);
+    return this.#sessions.typecheck(request.workspace, signalOptions(context));
   }
 
   async retrieveGoals(
@@ -203,6 +211,64 @@ export class AgdaApplicationService implements AgdaService {
       normalizeContextResponse(query.protocol.raw.events, request.goal),
       query.protocol.raw,
       this.#installation.warnings,
+    );
+  }
+
+  /**
+   * Fetch several goal contexts in one call. Agda still processes them one at a
+   * time — the interaction process is single-threaded — but the caller pays for
+   * one round trip instead of one per goal, and a bad handle only fails its own
+   * entry rather than the whole batch.
+   */
+  async retrieveContexts(
+    request: RetrieveContextsRequest,
+    context?: OperationContext,
+  ): Promise<NormalizedResult<ContextsResult>> {
+    const entries: ContextsEntry[] = [];
+    const transcripts: RawAgdaResponse[] = [];
+    const warnings: string[] = [];
+
+    for (const goal of request.goals) {
+      context?.signal?.throwIfAborted();
+      try {
+        const single = await this.retrieveContext(
+          { goal, ...(request.rewrite === undefined ? {} : { rewrite: request.rewrite }) },
+          context,
+        );
+        entries.push(Object.freeze({ goal, ok: true, context: single.data }));
+        transcripts.push(single.raw);
+        warnings.push(...single.warnings);
+      } catch (error: unknown) {
+        const applicationError =
+          error instanceof ApplicationError
+            ? error
+            : new ApplicationError("AGDA_COMMAND_REJECTED", "Goal context lookup failed", {
+                cause: error,
+              });
+        entries.push(
+          Object.freeze({
+            goal,
+            ok: false,
+            error: Object.freeze({
+              code: applicationError.code,
+              message: applicationError.message,
+              recoverable: applicationError.recoverable,
+            }),
+          }),
+        );
+      }
+    }
+
+    const succeeded = entries.filter((entry) => entry.ok).length;
+    return result(
+      Object.freeze({
+        requested: request.goals.length,
+        succeeded,
+        failed: entries.length - succeeded,
+        contexts: Object.freeze(entries),
+      }),
+      transcripts[0] ?? emptyRaw(this.#installation.adapter),
+      [...this.#installation.warnings, ...warnings],
     );
   }
 
@@ -423,8 +489,13 @@ export class AgdaApplicationService implements AgdaService {
   }
 }
 
-function signalOptions(context: OperationContext | undefined): { signal?: AbortSignal } {
-  return context?.signal === undefined ? {} : { signal: context.signal };
+function signalOptions(
+  context: OperationContext | undefined,
+): { signal?: AbortSignal; timeoutMs?: number } {
+  return {
+    ...(context?.signal === undefined ? {} : { signal: context.signal }),
+    ...(context?.timeoutMs === undefined ? {} : { timeoutMs: context.timeoutMs }),
+  };
 }
 
 function validateGoalHandle(goal: string): void {

@@ -13,7 +13,7 @@ import { parseServerOptions } from "../../src/application/config.js";
 import { ApplicationError } from "../../src/application/errors.js";
 import { discoverAgdaInstallation } from "../../src/discovery/agdaInstallation.js";
 
-test("the compiled CLI serves all twelve tools over clean stdio framing", async (context) => {
+test("the compiled CLI serves the full tool surface over clean stdio framing", async (context) => {
   const fixtureRoot = path.resolve("test/fixtures/agda-2.8.0");
   const options = parseServerOptions({ workspaceRoots: [fixtureRoot], commandTimeoutMs: 120_000 });
   let installation;
@@ -55,12 +55,18 @@ test("the compiled CLI serves all twelve tools over clean stdio framing", async 
         "agda_auto",
         "agda_case_split",
         "agda_infer_type",
+        "agda_job_await",
+        "agda_job_await_any",
+        "agda_job_cancel",
+        "agda_job_list",
+        "agda_job_status",
         "agda_load_module",
         "agda_normalize_expression",
         "agda_query_metavariables",
         "agda_refine",
         "agda_retrieve_constraints",
         "agda_retrieve_context",
+        "agda_retrieve_contexts",
         "agda_retrieve_goals",
         "agda_server_info",
         "agda_typecheck",
@@ -116,9 +122,18 @@ test("the compiled CLI serves all twelve tools over clean stdio framing", async 
     const auto = await client.callTool({ name: "agda_auto", arguments: { goal } });
     assert.equal(auto.isError, undefined);
 
-    const stale = await client.callTool({
+    // Previews restore identical bytes, so the pre-preview handle stays valid.
+    assert.equal(originalGoal, goal);
+    const reused = await client.callTool({
       name: "agda_retrieve_context",
       arguments: { goal: originalGoal },
+    });
+    assert.equal(reused.isError, undefined);
+
+    // A handle that was never issued still fails, with guidance attached.
+    const stale = await client.callTool({
+      name: "agda_retrieve_context",
+      arguments: { goal: "goal_never-issued" },
     });
     assert.equal(stale.isError, true);
     assert.equal(

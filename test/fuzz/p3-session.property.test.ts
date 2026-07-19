@@ -61,11 +61,22 @@ test("property: goal handles validate only against their complete bound state", 
           interactionPoints: new Set([7]),
         };
         assert.equal(table.validate(handle, current).interactionPoint, 7);
-        assert.throws(
-          () => table.validate(handle, { ...current, revision: revision + 1 }),
-          (error: unknown) =>
-            error instanceof ApplicationError && error.code === "STALE_GOAL_HANDLE",
+        // A bare revision bump no longer invalidates: identical source means
+        // identical interaction points. Every other binding still must match.
+        assert.equal(
+          table.validate(handle, { ...current, revision: revision + 1 }).interactionPoint,
+          7,
         );
+        const stale = (patch: Partial<typeof current>) =>
+          assert.throws(
+            () => table.validate(handle, { ...current, ...patch }),
+            (error: unknown) =>
+              error instanceof ApplicationError && error.code === "STALE_GOAL_HANDLE",
+          );
+        stale({ workspace: `${workspace}_other` });
+        stale({ modulePath: `${modulePath}x` });
+        stale({ sourceFingerprint: "other" });
+        stale({ interactionPoints: new Set([8]) });
         table.revokeAll();
         assert.throws(() => table.validate(handle, current));
       },

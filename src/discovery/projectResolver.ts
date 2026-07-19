@@ -29,6 +29,8 @@ export interface CommandOutputPolicy {
   readonly rawResponseLimitBytes: number;
   readonly stderrReturnLimitBytes: number;
   readonly maxCommandOutputBytes: number;
+  readonly abortGraceMs: number;
+  readonly handleEntropyBytes: number;
 }
 
 export interface ModuleDiscoveryPlan {
@@ -231,6 +233,8 @@ export async function discoverModulePlan(
       rawResponseLimitBytes: options.rawResponseLimitBytes,
       stderrReturnLimitBytes: options.stderrReturnLimitBytes,
       maxCommandOutputBytes: options.maxCommandOutputBytes,
+      abortGraceMs: options.abortGraceMs,
+      handleEntropyBytes: options.handleEntropyBytes,
     }),
     load,
     ...(projectFile === undefined ? {} : { projectFile }),

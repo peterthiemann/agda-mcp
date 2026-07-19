@@ -9,6 +9,7 @@ import { ApplicationError } from "../../src/application/errors.js";
 import { AgdaApplicationService } from "../../src/application/service.js";
 import type {
   EditPreviewResult,
+  ModuleCheckResult,
   NormalizedResult,
   TextEdit,
 } from "../../src/application/domain.js";
@@ -83,7 +84,8 @@ test("live refine and auto previews are non-mutating and applicable in all sourc
       assert.deepEqual(await readFile(modulePath), before, `${operation} wrote ${name}`);
       assert.equal(preview.data.edits.length, 1, `${operation} did not solve ${name}`);
       assert.equal(preview.data.restoredRevision, loaded.data.revision + 1);
-      assert.notEqual(preview.data.goals[0]?.handle, goal);
+      // The preview restored identical bytes, so the handle is reissued as-is.
+      assert.equal(preview.data.goals[0]?.handle, goal as string);
       assert.notEqual(preview.raw.restore, undefined);
       await applyAndTypecheck(service, loaded.data.workspace, modulePath, preview.data.edits[0]);
     }
@@ -108,15 +110,16 @@ test("live case split previews preserve all formats and produce typecheckable cl
     ]) {
       const modulePath = await copyFixture(directory, name);
       const before = await readFile(modulePath);
-      const loaded = await service.loadModule({ modulePath });
-      const goal = loaded.data.goals[0]?.handle;
+      const loaded: NormalizedResult<ModuleCheckResult> = await service.loadModule({ modulePath });
+      const goal: string | undefined = loaded.data.goals[0]?.handle;
       assert.notEqual(goal, undefined, name);
       const preview = await service.caseSplit({ goal: goal as string, variables: "x" });
       assert.deepEqual(await readFile(modulePath), before, `case split wrote ${name}`);
       assert.equal(preview.data.edits.length, 1);
       assert.match(preview.data.edits[0]?.replacement ?? "", /not true/u);
       assert.match(preview.data.edits[0]?.replacement ?? "", /not false/u);
-      assert.notEqual(preview.data.goals[0]?.handle, goal);
+      // The preview restored identical bytes, so the handle is reissued as-is.
+      assert.equal(preview.data.goals[0]?.handle, goal as string);
       await applyAndTypecheck(service, loaded.data.workspace, modulePath, preview.data.edits[0]);
     }
   } finally {

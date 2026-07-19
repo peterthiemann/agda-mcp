@@ -89,6 +89,8 @@ flags: --safe --no-caching
       rawResponseLimitBytes: 128 * 1024,
       stderrReturnLimitBytes: 32 * 1024,
       maxCommandOutputBytes: 16 * 1024 * 1024,
+      abortGraceMs: 1_000,
+      handleEntropyBytes: 24,
     });
     assert.deepEqual(plan.load.includePaths, [
       canonicalSourceDirectory,

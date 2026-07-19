@@ -80,6 +80,74 @@ Unknown fields and invalid limits are rejected before an Agda process starts.
 | `stderrReturnLimitBytes` | Soft captured-stderr return budget | `32768` |
 | `maxCommandOutputBytes` | Hard aggregate child-output limit | `16777216` |
 | `allowAgdaExec` | Permit `--allow-exec` in resolved flags | `false` |
+| `abortGraceMs` | Grace period before escalating an aborted command | `1000` |
+| `probeTimeoutMs` | Installation-probe timeout | `10000` |
+| `probeMaxBufferBytes` | Installation-probe output buffer | `1048576` |
+| `handleEntropyBytes` | Random bytes per workspace/goal/job handle (min `16`) | `24` |
+| `asyncMode` | `auto`, `never`, or `always`; see below | `auto` |
+| `deferAfterMs` | How long a tool call may block before deferring to a job | `2500` |
+| `maxJobWaitMs` | Ceiling on a single `agda_job_await` wait | `30000` |
+| `jobRetentionMs` | How long an uncollected finished job is kept | `300000` |
+| `maxTrackedJobs` | Maximum concurrently tracked jobs | `64` |
+| `progressIntervalMs` | Heartbeat for `notifications/progress` | `2000` |
+| `includeRawByDefault` | Ship Agda's native event log without asking | `false` |
+
+## Non-blocking operation
+
+Typechecking a large development can take minutes. Rather than hold the MCP
+request open for that whole time — which stalls the calling agent completely —
+any tool call that outruns `deferAfterMs` returns a job handle instead:
+
+```json
+{
+  "status": "pending",
+  "job": { "id": "job_...", "tool": "agda_load_module", "state": "running", "elapsedMs": 2500 },
+  "guidance": "Agda is still working ... call agda_job_await with job \"job_...\""
+}
+```
+
+Agda keeps working in the background while the caller is free to do something
+else, and the result is collected later with `agda_job_await`. Calls that
+finish inside the window return their result inline, exactly as before, so
+fast operations are unchanged.
+
+`asyncMode` controls the policy: `auto` (default) defers only slow calls,
+`never` restores fully synchronous behaviour, and `always` defers every call.
+
+### Per-call overrides
+
+Every Agda tool also accepts these fields, which shadow the configured values
+for one call only:
+
+| Field | Meaning |
+| --- | --- |
+| `timeoutMs` | Agda command timeout for this call |
+| `deferAfterMs` | Defer window for this call, capped by `maxJobWaitMs` |
+| `async` | `true` always returns a job handle; `false` blocks until Agda finishes |
+| `includeRaw` | Include Agda's native event log (see below) |
+| `diagnosticsOnly` | `agda_load_module` / `agda_typecheck` only: errors and warnings |
+
+```json
+{ "modulePath": "/src/Slow.agda", "timeoutMs": 600000, "async": true }
+```
+
+The cap on `deferAfterMs` is deliberate: a per-call value can shorten the
+window but can never reintroduce unbounded blocking.
+
+### Progress and completion notices
+
+While a request is open the server emits `notifications/progress` every
+`progressIntervalMs`, provided the client supplied a progress token. When any
+job settles it also emits a `notifications/message` log line. Neither can wake
+an agent mid-turn — MCP has no such mechanism — but they surface activity in
+clients that display progress or server logs.
+
+When work is fanned out across several workspaces, `agda_job_await_any` waits
+once for whichever job finishes first instead of polling each id in turn.
+
+A deferred job is deliberately detached from the request that created it —
+the transport closing that request does not cancel the Agda work. Use
+`agda_job_cancel` to abandon a job.
 
 When only the legacy `commandTimeoutMs` is supplied, it applies to all three
 operation categories. Specific timeout fields override it.
@@ -99,6 +167,7 @@ registered imports may live elsewhere.
 | `agda_typecheck` | Reload/typecheck the active workspace module |
 | `agda_retrieve_goals` | Retrieve current visible goals and opaque handles |
 | `agda_retrieve_context` | Retrieve a goal type, local context, and boundary |
+| `agda_retrieve_contexts` | Retrieve contexts for several goals in one round trip |
 | `agda_retrieve_constraints` | Retrieve current constraints |
 | `agda_case_split` | Preview case-split clause edits |
 | `agda_refine` | Preview a refinement or introduction edit |
@@ -106,6 +175,11 @@ registered imports may live elsewhere.
 | `agda_normalize_expression` | Normalize in top-level or goal-local scope |
 | `agda_infer_type` | Infer a type in top-level or goal-local scope |
 | `agda_query_metavariables` | Query visible and backend-published invisible metas |
+| `agda_job_await` | Collect a pending job's result, waiting up to `waitMs` |
+| `agda_job_await_any` | Wait for the FIRST of several jobs to finish |
+| `agda_job_status` | Report a job's state without waiting |
+| `agda_job_cancel` | Abort a pending job |
+| `agda_job_list` | List jobs still running or awaiting collection |
 
 `agda_load_module` returns an opaque workspace handle. Goal-producing results
 return opaque goal handles bound to the module path, revision, source
@@ -116,6 +190,40 @@ handles.
 Expression tools require exactly one of `workspace` or `goal`. Input schemas
 are strict, so contradictory selectors and unknown properties fail before
 reaching Agda.
+
+## Response size
+
+Agda's native event log is the largest part of a response and is rarely useful
+to a caller, so `raw.events` is **omitted by default**. What remains is a
+summary — `eventsOmitted`, `eventCount`, byte counts, completeness, stderr — so
+truncation is still detectable:
+
+```json
+{ "adapter": "agda-2.8.0", "eventsOmitted": true, "eventCount": 7,
+  "capturedBytes": 812, "totalBytes": 812, "stderr": { "chunks": [] } }
+```
+
+Pass `includeRaw: true` per call, or set `includeRawByDefault: true`, to get the
+full transcript back. A per-call value always wins over the server default.
+
+`diagnosticsOnly: true` further drops `goals` and `invisibleMetavariables` from
+a load or typecheck, leaving the verdict and diagnostics — useful for the common
+"did it compile?" question.
+
+## Batched goal contexts
+
+`agda_retrieve_contexts` takes a list of goal handles and returns one entry per
+goal, in request order:
+
+```json
+{ "requested": 3, "succeeded": 2, "failed": 1,
+  "contexts": [ { "goal": "goal_...", "ok": true, "context": { "goalType": "Bool", "context": [] } },
+                { "goal": "goal_bad", "ok": false, "error": { "code": "STALE_GOAL_HANDLE" } } ] }
+```
+
+Agda still processes the goals one at a time — the interaction process is
+single-threaded — but the caller pays for one round trip instead of N, and one
+bad handle fails only its own entry.
 
 ## Non-mutating edit previews
 

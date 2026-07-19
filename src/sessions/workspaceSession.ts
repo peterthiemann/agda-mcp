@@ -144,7 +144,7 @@ export class WorkspaceSession {
   readonly root: string;
   readonly #adapter: AgdaProtocolAdapter;
   readonly #queue: SerializedCommandQueue;
-  readonly #goals = new GoalHandleTable();
+  readonly #goals: GoalHandleTable;
   readonly #hostFactory: ProcessHostFactory;
   readonly #hostOptions: AgdaProcessHostOptions;
   #host: AgdaProcessHost;
@@ -155,9 +155,11 @@ export class WorkspaceSession {
   #terminating = false;
 
   constructor(options: WorkspaceSessionOptions) {
-    this.handle = `workspace_${randomBytes(24).toString("base64url")}`;
+    const entropyBytes = options.plan.commandPolicy.handleEntropyBytes;
+    this.handle = `workspace_${randomBytes(entropyBytes).toString("base64url")}`;
     this.root = options.plan.projectRoot;
     this.#adapter = options.adapter;
+    this.#goals = new GoalHandleTable(entropyBytes);
     this.#queue = new SerializedCommandQueue(options.plan.commandPolicy.maxQueuedCommands);
     this.#hostFactory = options.processHostFactory ?? ((hostOptions) => new AgdaProcessHost(hostOptions));
     this.#hostOptions = {
@@ -187,25 +189,25 @@ export class WorkspaceSession {
 
   load(
     plan: ModuleDiscoveryPlan,
-    signal?: AbortSignal,
+    options: SendCommandOptions = {},
   ): Promise<NormalizedResult<ModuleCheckResult>> {
     if (plan.projectRoot !== this.root) {
       return Promise.reject(
         new ApplicationError("UNKNOWN_WORKSPACE", "Module plan belongs to another workspace session"),
       );
     }
-    return this.#queue.enqueue(() => this.#loadNow(plan, signal), signal);
+    return this.#queue.enqueue(() => this.#loadNow(plan, options), options.signal);
   }
 
-  typecheck(signal?: AbortSignal): Promise<NormalizedResult<ModuleCheckResult>> {
+  typecheck(options: SendCommandOptions = {}): Promise<NormalizedResult<ModuleCheckResult>> {
     return this.#queue.enqueue(async () => {
       const active = this.#active;
       if (active === undefined) {
-        const recovered = await this.#recoverNow(signal);
+        const recovered = await this.#recoverNow(options);
         return recovered.result;
       }
-      return this.#loadNow(active.plan, signal);
-    }, signal);
+      return this.#loadNow(active.plan, options);
+    }, options.signal);
   }
 
   resolveGoal(handle: string): GoalRecord {
@@ -250,7 +252,7 @@ export class WorkspaceSession {
     options: SendCommandOptions = {},
   ): Promise<ProtocolCommandResult> {
     return this.#queue.enqueue(async () => {
-      const active = await this.#activeNow(options.signal);
+      const active = await this.#activeNow(options);
       await this.assertSourceUnchanged();
       return this.#host.sendCommand(
         command,
@@ -265,7 +267,7 @@ export class WorkspaceSession {
     options: SendCommandOptions = {},
   ): Promise<SessionQueryState> {
     return this.#queue.enqueue(async () => {
-      const active = await this.#activeNow(options.signal);
+      const active = await this.#activeNow(options);
       await this.assertSourceUnchanged();
       const protocol = await this.#host.sendCommand(
         command,
@@ -389,7 +391,7 @@ export class WorkspaceSession {
 
   async #loadNow(
     plan: ModuleDiscoveryPlan,
-    signal?: AbortSignal,
+    options: SendCommandOptions = {},
   ): Promise<NormalizedResult<ModuleCheckResult>> {
     this.#ensureHost();
     this.#lifecycle = this.#host.state === "new" ? "starting" : "ready";
@@ -399,10 +401,7 @@ export class WorkspaceSession {
     const protocol = await this.#host.sendCommand(
       { kind: "load", modulePath: plan.modulePath, arguments: plan.load.arguments },
       context,
-      {
-        timeoutMs: plan.commandPolicy.loadTimeoutMs,
-        ...(signal === undefined ? {} : { signal }),
-      },
+      sendOptions(options, plan.commandPolicy.loadTimeoutMs),
     );
     const normalized = normalizeLoadResponse(protocol.raw.events, snapshot.text, plan.modulePath);
     this.#revision += 1;
@@ -458,11 +457,11 @@ export class WorkspaceSession {
     return result;
   }
 
-  async #activeNow(signal?: AbortSignal): Promise<ActiveModuleState> {
-    return this.#active ?? this.#recoverNow(signal);
+  async #activeNow(options: SendCommandOptions = {}): Promise<ActiveModuleState> {
+    return this.#active ?? this.#recoverNow(options);
   }
 
-  async #recoverNow(signal?: AbortSignal): Promise<ActiveModuleState> {
+  async #recoverNow(options: SendCommandOptions = {}): Promise<ActiveModuleState> {
     const recoverable = this.#recoverable;
     if (recoverable === undefined) {
       throw new ApplicationError("NO_ACTIVE_MODULE", "Workspace has no active module");
@@ -474,7 +473,7 @@ export class WorkspaceSession {
       throw sourceChangedError(recoverable, current.fingerprint);
     }
     this.#ensureHost();
-    await this.#loadNow(recoverable.plan, signal);
+    await this.#loadNow(recoverable.plan, options);
     return this.#active as ActiveModuleState;
   }
 

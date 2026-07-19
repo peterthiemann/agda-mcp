@@ -1,5 +1,6 @@
-import { randomBytes } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 
+import { DEFAULT_HANDLE_ENTROPY_BYTES } from "../application/config.js";
 import type { GoalHandle, SourceRange, WorkspaceHandle } from "../application/domain.js";
 import { ApplicationError } from "../application/errors.js";
 import type { AgdaProtocolRange } from "../protocol/adapter.js";
@@ -24,16 +25,45 @@ export interface CurrentGoalState {
 
 export class GoalHandleTable {
   readonly #records = new Map<GoalHandle, GoalRecord>();
+  readonly #secret: Buffer;
+  readonly #digestBytes: number;
+
+  constructor(entropyBytes: number = DEFAULT_HANDLE_ENTROPY_BYTES) {
+    // A per-session secret keeps deterministic handles unguessable from outside.
+    this.#secret = randomBytes(entropyBytes);
+    this.#digestBytes = entropyBytes;
+  }
 
   get size(): number {
     return this.#records.size;
   }
 
+  /**
+   * Handles are derived from the goal's identity rather than drawn at random,
+   * so reloading unchanged source reissues byte-identical handles. That keeps
+   * a caller's handles alive across the reload that case split, refine, and
+   * auto perform internally, and across a no-op typecheck.
+   *
+   * The source fingerprint is part of the identity on purpose: once the file
+   * changes, Agda may renumber interaction points, so yesterday's handle must
+   * NOT silently resolve to a different hole.
+   */
   issue(record: GoalRecord): GoalHandle {
-    let handle: GoalHandle;
-    do {
-      handle = `goal_${randomBytes(24).toString("base64url")}`;
-    } while (this.#records.has(handle));
+    // The NUL separator cannot occur in a path or a hex fingerprint, so the
+    // joined parts can never be confused for one another.
+    const digest = createHmac("sha256", this.#secret)
+      .update(
+        [
+          record.workspace,
+          record.modulePath,
+          record.sourceFingerprint,
+          String(record.interactionPoint),
+        ].join("\u0000"),
+      )
+      .digest()
+      .subarray(0, this.#digestBytes)
+      .toString("base64url");
+    const handle: GoalHandle = `goal_${digest}`;
     this.#records.set(handle, Object.freeze({ ...record }));
     return handle;
   }
@@ -44,7 +74,6 @@ export class GoalHandleTable {
       record === undefined ||
       record.workspace !== current.workspace ||
       record.modulePath !== current.modulePath ||
-      record.revision !== current.revision ||
       record.sourceFingerprint !== current.sourceFingerprint ||
       !current.interactionPoints.has(record.interactionPoint)
     ) {

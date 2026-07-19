@@ -4,6 +4,7 @@ import type {
   CaseSplitRequest,
   ConstraintsResult,
   ContextResult,
+  ContextsResult,
   EditPreviewResult,
   GoalsResult,
   InferTypeRequest,
@@ -17,6 +18,7 @@ import type {
   OperationContext,
   RefineRequest,
   RetrieveContextRequest,
+  RetrieveContextsRequest,
   ServerInfo,
   WorkspaceRequest,
 } from "./domain.js";
@@ -39,6 +41,10 @@ export interface AgdaService {
     request: RetrieveContextRequest,
     context?: OperationContext,
   ): Promise<NormalizedResult<ContextResult>>;
+  retrieveContexts(
+    request: RetrieveContextsRequest,
+    context?: OperationContext,
+  ): Promise<NormalizedResult<ContextsResult>>;
   retrieveConstraints(
     request: WorkspaceRequest,
     context?: OperationContext,

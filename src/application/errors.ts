@@ -13,6 +13,8 @@ export const APPLICATION_ERROR_CODES = [
   "PROCESS_EXITED",
   "OUTPUT_LIMIT_EXCEEDED",
   "RESTORE_FAILED",
+  "UNKNOWN_JOB",
+  "JOB_CANCELLED",
 ] as const;
 
 export type ApplicationErrorCode = (typeof APPLICATION_ERROR_CODES)[number];
@@ -38,6 +40,8 @@ const DEFAULT_RECOVERABILITY: Readonly<Record<ApplicationErrorCode, boolean>> = 
   PROCESS_EXITED: true,
   OUTPUT_LIMIT_EXCEEDED: true,
   RESTORE_FAILED: true,
+  UNKNOWN_JOB: true,
+  JOB_CANCELLED: true,
 };
 
 export class ApplicationError extends Error {
