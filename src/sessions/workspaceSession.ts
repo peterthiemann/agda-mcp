@@ -150,9 +150,9 @@ export class WorkspaceSession {
   #host: AgdaProcessHost;
   #lifecycle: WorkspaceSessionSummary["lifecycle"] = "starting";
   #revision = 0;
-  // Advances on every externally visible reload. Unlike the revision it is
-  // deliberately NOT advanced by the restore reload of a transformation
-  // preview, so a preview does not invalidate the caller's goal handles.
+  // Identifies one observable Agda state. Advances on every reload, so any
+  // load, typecheck, module switch, recovery or preview restore revokes the
+  // handles issued under the previous generation.
   #generation = 0;
   #active: ActiveModuleState | undefined;
   #recoverable: ActiveModuleState | undefined;
@@ -347,7 +347,7 @@ export class WorkspaceSession {
       let restored: NormalizedResult<ModuleCheckResult>;
       try {
         if (!operationAttempted) throw operationError;
-        restored = await this.#loadNow(active.plan, {}, true);
+        restored = await this.#loadNow(active.plan);
       } catch (restoreError: unknown) {
         this.#active = undefined;
         this.#recoverable = undefined;
@@ -396,15 +396,10 @@ export class WorkspaceSession {
   async #loadNow(
     plan: ModuleDiscoveryPlan,
     options: SendCommandOptions = {},
-    preserveHandles = false,
   ): Promise<NormalizedResult<ModuleCheckResult>> {
     this.#ensureHost();
     this.#lifecycle = this.#host.state === "new" ? "starting" : "ready";
     const snapshot = await readSnapshot(plan.modulePath);
-    const previousHandles = preserveHandles
-      ? this.#goals.handlesByInteractionPoint()
-      : undefined;
-    const previousFingerprint = this.#active?.snapshot.fingerprint;
     this.#goals.revokeAll();
     const context: AgdaCommandContext = { currentFile: plan.modulePath };
     const protocol = await this.#host.sendCommand(
@@ -414,11 +409,11 @@ export class WorkspaceSession {
     );
     const normalized = normalizeLoadResponse(protocol.raw.events, snapshot.text, plan.modulePath);
     this.#revision += 1;
-    // Handles may only carry over when this reload restored byte-identical
-    // source; otherwise Agda may have renumbered the interaction points.
-    const carryHandles =
-      previousHandles !== undefined && previousFingerprint === snapshot.fingerprint;
-    if (!carryHandles) this.#generation += 1;
+    // Every reload starts a new generation, including the restore reload of a
+    // transformation preview. An unchanged top-level fingerprint does not imply
+    // unchanged imported modules, so the resulting Agda state may differ; the
+    // transaction returns freshly issued goals for the caller to use instead.
+    this.#generation += 1;
     const interactionPoints = new Set(normalized.goals.map((goal) => goal.interactionPoint));
     const goalHandles = new Map<number, string>();
     const goals: GoalSummary[] = normalized.goals.map((goal) => {
@@ -433,10 +428,7 @@ export class WorkspaceSession {
         range,
       };
       const nativeRange = protocolRange(plan.modulePath, snapshot.text, range);
-      const handle = this.#goals.issue(
-        { ...partial, protocolRange: nativeRange },
-        carryHandles ? previousHandles?.get(goal.interactionPoint) : undefined,
-      );
+      const handle = this.#goals.issue({ ...partial, protocolRange: nativeRange });
       goalHandles.set(goal.interactionPoint, handle);
       return Object.freeze({
         handle,

@@ -11,9 +11,8 @@ export interface GoalRecord {
   readonly revision: number;
   /**
    * The load generation the handle was issued under. A generation covers one
-   * externally observable Agda state: it advances on every load, typecheck and
-   * recovery, and is preserved only across the internal restore reload that a
-   * transformation preview performs.
+   * observable Agda state and advances on every reload, so any load,
+   * typecheck, module switch, recovery or preview restore revokes it.
    */
   readonly generation: number;
   readonly sourceFingerprint: string;
@@ -47,29 +46,14 @@ export class GoalHandleTable {
    * derived handle could be reconstructed after the table had deliberately
    * dropped it, letting a handle come back to life after switching away from
    * and back to a module.
-   *
-   * `preferredHandle` reissues an existing token for the same interaction
-   * point. It is used only by the internal restore reload of a transformation
-   * preview, which preserves the load generation.
    */
-  issue(record: GoalRecord, preferredHandle?: GoalHandle): GoalHandle {
+  issue(record: GoalRecord): GoalHandle {
     let handle: GoalHandle;
-    if (preferredHandle !== undefined && !this.#records.has(preferredHandle)) {
-      handle = preferredHandle;
-    } else {
-      do {
-        handle = `goal_${randomBytes(this.#entropyBytes).toString("base64url")}`;
-      } while (this.#records.has(handle));
-    }
+    do {
+      handle = `goal_${randomBytes(this.#entropyBytes).toString("base64url")}`;
+    } while (this.#records.has(handle));
     this.#records.set(handle, Object.freeze({ ...record }));
     return handle;
-  }
-
-  /** Existing handles keyed by interaction point, for a preserving reload. */
-  handlesByInteractionPoint(): ReadonlyMap<number, GoalHandle> {
-    const byPoint = new Map<number, GoalHandle>();
-    for (const [handle, record] of this.#records) byPoint.set(record.interactionPoint, handle);
-    return byPoint;
   }
 
   validate(handle: GoalHandle, current: CurrentGoalState): GoalRecord {

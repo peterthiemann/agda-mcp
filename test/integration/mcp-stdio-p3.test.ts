@@ -122,18 +122,11 @@ test("the compiled CLI serves the full tool surface over clean stdio framing", a
     const auto = await client.callTool({ name: "agda_auto", arguments: { goal } });
     assert.equal(auto.isError, undefined);
 
-    // Previews restore identical bytes, so the pre-preview handle stays valid.
-    assert.equal(originalGoal, goal);
-    const reused = await client.callTool({
-      name: "agda_retrieve_context",
-      arguments: { goal: originalGoal },
-    });
-    assert.equal(reused.isError, undefined);
-
-    // A handle that was never issued still fails, with guidance attached.
+    // The preview's restore reload rotates handles, so the prior one is stale.
+    assert.notEqual(originalGoal, goal);
     const stale = await client.callTool({
       name: "agda_retrieve_context",
-      arguments: { goal: "goal_never-issued" },
+      arguments: { goal: originalGoal },
     });
     assert.equal(stale.isError, true);
     assert.equal(

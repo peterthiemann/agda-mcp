@@ -41,7 +41,7 @@ async function fixture(fake: string = FAKE_AGDA) {
   return { directory, modulePath, service };
 }
 
-test("transformation previews preserve bytes, restore state, and keep handles usable", async () => {
+test("transformation previews preserve bytes, restore state, and rotate handles", async () => {
   const testFixture = await fixture();
   try {
     const before = await readFile(testFixture.modulePath);
@@ -53,12 +53,14 @@ test("transformation previews preserve bytes, restore state, and keep handles us
     assert.equal(preview.data.restoredRevision, loaded.data.revision + 1);
     assert.equal(preview.data.edits[0]?.replacement, "x");
     assert.equal(preview.data.edits[0]?.expectedSourceFingerprint, loaded.data.sourceFingerprint);
-    // The preview restored identical bytes, so the caller's handle is still good.
-    assert.equal(preview.data.goals[0]?.handle, goal);
+    // The restore reload starts a new generation, so the prior handle is gone.
+    assert.notEqual(preview.data.goals[0]?.handle, goal);
     assert.notEqual(preview.raw.restore, undefined);
     assert.equal(preview.raw.events.some((event) => (event as { kind?: unknown }).kind === "GiveAction"), true);
-    const reused = await testFixture.service.refine({ goal: goal as string });
-    assert.equal(reused.data.goals[0]?.handle, goal);
+    await assert.rejects(
+      testFixture.service.refine({ goal: goal as string }),
+      (error: unknown) => error instanceof ApplicationError && error.code === "STALE_GOAL_HANDLE",
+    );
 
     const restoredGoal = preview.data.goals[0]?.handle;
     assert.notEqual(restoredGoal, undefined);
@@ -77,7 +79,7 @@ test("transformation previews preserve bytes, restore state, and keep handles us
   }
 });
 
-test("a rejected proposal still reloads and leaves the goal handle usable", async () => {
+test("a rejected proposal still reloads and rotates the goal state", async () => {
   const testFixture = await fixture();
   try {
     const before = await readFile(testFixture.modulePath);
@@ -92,9 +94,11 @@ test("a rejected proposal still reloads and leaves the goal handle usable", asyn
     const info = await testFixture.service.serverInfo();
     assert.equal(info.data.workspaces[0]?.revision, loaded.data.revision + 1);
     assert.equal(info.data.workspaces[0]?.lifecycle, "ready");
-    // The reload after rejection reissues the same handle, so retrying is free.
-    const retried = await testFixture.service.auto({ goal: goal as string });
-    assert.equal(retried.data.goals[0]?.handle, goal);
+    // The reload after rejection also starts a new generation.
+    await assert.rejects(
+      testFixture.service.auto({ goal: goal as string }),
+      (error: unknown) => error instanceof ApplicationError && error.code === "STALE_GOAL_HANDLE",
+    );
   } finally {
     await testFixture.service.shutdown();
     await rm(testFixture.directory, { recursive: true, force: true });

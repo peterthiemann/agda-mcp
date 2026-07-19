@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
@@ -6,6 +8,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 
 import { parseServerOptions } from "../../src/application/config.js";
+import { ApplicationError } from "../../src/application/errors.js";
 import { AgdaApplicationService } from "../../src/application/service.js";
 import type { AgdaInstallation } from "../../src/discovery/agdaInstallation.js";
 import { createAgdaMcpServer } from "../../src/mcp/stdioServer.js";
@@ -177,6 +180,118 @@ test("batched contexts isolate a bad handle instead of failing the whole call", 
     );
   } finally {
     await harness.close();
+  }
+});
+
+test("a batch is bounded by maxBatchGoals", async () => {
+  const service = await AgdaApplicationService.create(
+    parseServerOptions({ workspaceRoots: [FIXTURE_ROOT], commandTimeoutMs: 2_000, maxBatchGoals: 3 }),
+    {
+      installation: INSTALLATION,
+      processHostFactory: (options) =>
+        new AgdaProcessHost({
+          ...options,
+          executable: process.execPath,
+          launchArguments: [FAKE_CONTEXTS],
+        }),
+    },
+  );
+  try {
+    const loaded = await service.loadModule({ modulePath: MODULE_PATH });
+    const goal = loaded.data.goals[0]?.handle as string;
+
+    await assert.rejects(
+      service.retrieveContexts({ goals: [goal, goal, goal, goal] }),
+      (error: unknown) =>
+        error instanceof ApplicationError &&
+        error.code === "INVALID_ARGUMENT" &&
+        (error.details as { maxBatchGoals?: number }).maxBatchGoals === 3,
+      "a batch over the limit must be refused before any Agda work runs",
+    );
+    await assert.rejects(
+      service.retrieveContexts({ goals: [] }),
+      (error: unknown) => error instanceof ApplicationError && error.code === "INVALID_ARGUMENT",
+    );
+    // At the limit it still works.
+    const ok = await service.retrieveContexts({ goals: [goal, goal, goal] });
+    assert.equal(ok.data.succeeded, 3);
+  } finally {
+    await service.shutdown();
+  }
+});
+
+test("a batch response is re-truncated against one aggregate raw budget", async () => {
+  // Sized so the load (~443B) and each individual context command (~181B) fit
+  // comfortably, but three contexts merged (~543B) cannot.
+  const service = await AgdaApplicationService.create(
+    parseServerOptions({
+      workspaceRoots: [FIXTURE_ROOT],
+      commandTimeoutMs: 2_000,
+      rawResponseLimitBytes: 500,
+      maxCommandOutputBytes: 1024 * 1024,
+    }),
+    {
+      installation: INSTALLATION,
+      processHostFactory: (options) =>
+        new AgdaProcessHost({
+          ...options,
+          executable: process.execPath,
+          launchArguments: [FAKE_CONTEXTS],
+        }),
+    },
+  );
+  try {
+    const loaded = await service.loadModule({ modulePath: MODULE_PATH });
+    const goal = loaded.data.goals[0]?.handle as string;
+    const batch = await service.retrieveContexts({ goals: [goal, goal, goal] });
+
+    assert.ok(
+      batch.raw.capturedBytes <= 500,
+      `merged capturedBytes ${batch.raw.capturedBytes} must respect the 500B budget`,
+    );
+    assert.ok(batch.data.succeeded === 3, "all three goals still resolve");
+    assert.ok(batch.raw.omittedEventCount > 0, "the merge must report what it dropped");
+    assert.equal(batch.raw.complete, false);
+    // Omission evidence is combined, not discarded.
+    assert.match(batch.raw.omittedSha256 ?? "", /^[0-9a-f]{64}$/u);
+    // Totals still describe everything Agda produced.
+    assert.ok(batch.raw.totalBytes >= batch.raw.capturedBytes);
+  } finally {
+    await service.shutdown();
+  }
+});
+
+test("a session-wide failure aborts a batch instead of becoming one goal's error", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "agda-mcp-batch-"));
+  const modulePath = path.join(directory, "Tiny.agda");
+  await writeFile(modulePath, await readFile(MODULE_PATH));
+  const service = await AgdaApplicationService.create(
+    parseServerOptions({ workspaceRoots: [directory], commandTimeoutMs: 2_000 }),
+    {
+      installation: INSTALLATION,
+      processHostFactory: (options) =>
+        new AgdaProcessHost({
+          ...options,
+          executable: process.execPath,
+          launchArguments: [FAKE_CONTEXTS],
+        }),
+    },
+  );
+  try {
+    const loaded = await service.loadModule({ modulePath });
+    const goal = loaded.data.goals[0]?.handle as string;
+
+    // The module changes on disk: SOURCE_CHANGED describes the session, not
+    // any one goal, so the whole batch must fail rather than reporting it as
+    // the first goal's error and continuing.
+    await writeFile(modulePath, `${await readFile(modulePath, "utf8")}\n-- external\n`);
+    await assert.rejects(
+      service.retrieveContexts({ goals: [goal, goal] }),
+      (error: unknown) => error instanceof ApplicationError && error.code === "SOURCE_CHANGED",
+    );
+  } finally {
+    await service.shutdown();
+    await rm(directory, { recursive: true, force: true });
   }
 });
 

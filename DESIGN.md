@@ -275,13 +275,13 @@ of those invalidate existing handles — unchanged top-level source does not
 imply unchanged imported dependencies or unchanged Agda state, so nothing
 weaker would be sound.
 
-The single exception is the internal restore reload that a transformation
-preview performs. Because that reload replays byte-identical source purely to
-undo the preview, it preserves the generation and reissues the same tokens for
-the same interaction points. This is what keeps case split, refine and auto
-from invalidating the caller's handles as a side effect. The reload falls back
-to a new generation, and fresh handles, whenever the fingerprint it restored
-does not match the one it started from.
+The internal restore reload that a transformation preview performs advances
+the generation too. It replays byte-identical top-level source, but an imported
+module may have changed during the reload, so the resulting Agda state is not
+guaranteed to match and the old handles cannot be assumed to denote the same
+goals. The transaction returns freshly issued goals for the caller to use
+instead. Preserving handles across that reload could be reconsidered given a
+reliable digest of the full dependency state.
 
 Stale use fails with `STALE_GOAL_HANDLE` and does not reach Agda.
 

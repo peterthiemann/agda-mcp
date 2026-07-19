@@ -91,6 +91,7 @@ Unknown fields and invalid limits are rejected before an Agda process starts.
 | `maxTrackedJobs` | Maximum concurrently tracked jobs | `64` |
 | `progressIntervalMs` | Heartbeat for `notifications/progress` | `2000` |
 | `includeRawByDefault` | Ship Agda's native event log | `true` |
+| `maxBatchGoals` | Maximum goals one batched request may resolve | `32` |
 
 ## Non-blocking operation
 
@@ -228,11 +229,19 @@ goal, in request order:
 ```
 
 Agda still processes the goals one at a time — the interaction process is
-single-threaded — but the caller pays for one round trip instead of N. A
-per-goal problem (a stale handle, a rejected command) becomes that entry's
-error; an infrastructure failure or a cancellation aborts the whole batch
-rather than being misreported as one goal's fault. The returned `raw`
-transcript merges every command that ran.
+single-threaded — but the caller pays for one round trip instead of N.
+
+A batch is limited to `maxBatchGoals` goals. Only failures attributable to one
+goal — a stale handle, or a command Agda rejected, timed out on, or answered
+too voluminously — become that goal's entry. Anything describing the session or
+the batch (`SOURCE_CHANGED`, `NO_ACTIVE_MODULE`, `UNKNOWN_WORKSPACE`, a dead
+process, a cancellation) aborts the whole call, because the remaining goals
+could not be answered either.
+
+The returned `raw` merges every command that ran and is re-truncated against a
+single `rawResponseLimitBytes` budget, so a batch cannot build a response
+larger than one command may. The combined `omittedSha256` covers each source
+transcript's own omission digest followed by every event the merge dropped.
 
 ## Non-mutating edit previews
 

@@ -1,3 +1,5 @@
+import { createHash, type Hash } from "node:crypto";
+
 import type {
   AutoRequest,
   AutoResult,
@@ -73,20 +75,21 @@ export interface AgdaApplicationServiceDependencies {
 }
 
 /**
- * A batch entry may legitimately fail on its own: a stale handle, a rejected
- * command, a source change. Anything else — a dead process, a failed restore,
- * a cancelled request, a bad argument — indicates the batch as a whole cannot
- * continue and must propagate.
+ * Only failures that are genuinely attributable to one goal may be isolated
+ * into that goal's entry: a handle that went stale, or a command that Agda
+ * rejected, timed out, or answered too voluminously for this goal alone.
+ *
+ * Everything else describes the session or the batch rather than a goal —
+ * SOURCE_CHANGED, NO_ACTIVE_MODULE and UNKNOWN_WORKSPACE all mean the
+ * remaining goals cannot be answered either — so it aborts the batch instead
+ * of being misreported as one goal's fault.
  */
 const PER_GOAL_FAILURE_CODES: ReadonlySet<string> = new Set([
   "STALE_GOAL_HANDLE",
-  "SOURCE_CHANGED",
   "AGDA_COMMAND_REJECTED",
   "COMMAND_TIMEOUT",
   "OUTPUT_LIMIT_EXCEEDED",
   "UNSUPPORTED_EDIT_SHAPE",
-  "NO_ACTIVE_MODULE",
-  "UNKNOWN_WORKSPACE",
 ]);
 
 function isPerGoalFailure(error: unknown): boolean {
@@ -105,32 +108,92 @@ function rawTranscript(raw: RawAgdaResponse): RawCommandTranscript {
   });
 }
 
+export interface TranscriptBudget {
+  readonly rawResponseLimitBytes: number;
+  readonly stderrReturnLimitBytes: number;
+}
+
 /**
- * Combine the per-command transcripts of a batch into one response. Every
- * command's events and byte counts are represented; nothing is silently
- * dropped just because several commands ran.
+ * Combine the per-command transcripts of a batch into one response under a
+ * single output budget.
+ *
+ * A batch runs several Agda commands, so concatenating their transcripts
+ * unchecked would let one request build a response many times larger than the
+ * configured per-command limit. The aggregate is therefore re-truncated
+ * against the same budget, and the omission evidence is combined rather than
+ * discarded: the digest covers each source transcript's own `omittedSha256`
+ * followed by every event this merge drops.
  */
 function mergeTranscripts(
   adapter: string,
   transcripts: readonly RawCommandTranscript[],
+  budget: TranscriptBudget,
 ): RawAgdaResponse {
   if (transcripts.length === 0) return emptyRaw(adapter);
-  const stderrChunks = transcripts.flatMap((entry) => [...entry.stderr.chunks]);
+
   const sum = (pick: (entry: RawCommandTranscript) => number): number =>
     transcripts.reduce((total, entry) => total + pick(entry), 0);
+
+  const events: unknown[] = [];
+  let capturedBytes = 0;
+  let omittedEventCount = sum((entry) => entry.omittedEventCount);
+  let omittedHash: Hash | undefined;
+  const recordOmission = (serialized: string): void => {
+    omittedHash ??= createHash("sha256");
+    omittedHash.update(serialized, "utf8");
+  };
+
+  // Preserve upstream evidence first, in transcript order.
+  for (const entry of transcripts) {
+    if (entry.omittedSha256 !== undefined) recordOmission(entry.omittedSha256);
+  }
+
+  let truncated = false;
+  for (const entry of transcripts) {
+    for (const event of entry.events) {
+      const serialized = JSON.stringify(event) ?? "null";
+      const bytes = Buffer.byteLength(serialized);
+      if (!truncated && capturedBytes + bytes <= budget.rawResponseLimitBytes) {
+        events.push(event);
+        capturedBytes += bytes;
+        continue;
+      }
+      truncated = true;
+      omittedEventCount += 1;
+      recordOmission(serialized);
+    }
+  }
+
+  const stderrChunks: string[] = [];
+  let stderrCaptured = 0;
+  let stderrTruncated = false;
+  for (const entry of transcripts) {
+    for (const chunk of entry.stderr.chunks) {
+      const bytes = Buffer.byteLength(chunk);
+      if (!stderrTruncated && stderrCaptured + bytes <= budget.stderrReturnLimitBytes) {
+        stderrChunks.push(chunk);
+        stderrCaptured += bytes;
+        continue;
+      }
+      stderrTruncated = true;
+    }
+  }
+
+  const omittedSha256 = omittedHash?.digest("hex");
   return Object.freeze({
     adapter,
-    events: Object.freeze(transcripts.flatMap((entry) => [...entry.events])),
-    complete: transcripts.every((entry) => entry.complete),
-    capturedBytes: sum((entry) => entry.capturedBytes),
+    events: Object.freeze(events),
+    complete: omittedEventCount === 0,
+    capturedBytes,
     totalBytes: sum((entry) => entry.totalBytes),
-    omittedEventCount: sum((entry) => entry.omittedEventCount),
+    omittedEventCount,
     stderr: Object.freeze({
       chunks: Object.freeze(stderrChunks),
-      complete: transcripts.every((entry) => entry.stderr.complete),
-      capturedBytes: sum((entry) => entry.stderr.capturedBytes),
+      complete: !stderrTruncated && transcripts.every((entry) => entry.stderr.complete),
+      capturedBytes: stderrCaptured,
       totalBytes: sum((entry) => entry.stderr.totalBytes),
     }),
+    ...(omittedSha256 === undefined ? {} : { omittedSha256 }),
   });
 }
 
@@ -286,6 +349,19 @@ export class AgdaApplicationService implements AgdaService {
     request: RetrieveContextsRequest,
     context?: OperationContext,
   ): Promise<NormalizedResult<ContextsResult>> {
+    if (request.goals.length === 0) {
+      throw new ApplicationError("INVALID_ARGUMENT", "goals must not be empty", {
+        details: { path: "goals" },
+      });
+    }
+    if (request.goals.length > this.#options.maxBatchGoals) {
+      throw new ApplicationError(
+        "INVALID_ARGUMENT",
+        `A batch may resolve at most ${this.#options.maxBatchGoals} goals`,
+        { details: { requested: request.goals.length, maxBatchGoals: this.#options.maxBatchGoals } },
+      );
+    }
+
     const entries: ContextsEntry[] = [];
     const transcripts: RawCommandTranscript[] = [];
 
@@ -331,7 +407,10 @@ export class AgdaApplicationService implements AgdaService {
       // retrieveContext already folded in the installation warnings, so they
       // are not added again here.
       warnings: this.#installation.warnings,
-      raw: mergeTranscripts(this.#installation.adapter, transcripts),
+      raw: mergeTranscripts(this.#installation.adapter, transcripts, {
+        rawResponseLimitBytes: this.#options.rawResponseLimitBytes,
+        stderrReturnLimitBytes: this.#options.stderrReturnLimitBytes,
+      }),
     });
   }
 

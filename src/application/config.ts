@@ -20,6 +20,9 @@ export const DEFAULT_DEFER_AFTER_MS = 2_500;
 export const DEFAULT_MAX_JOB_WAIT_MS = 30_000;
 export const DEFAULT_JOB_RETENTION_MS = 300_000;
 export const DEFAULT_MAX_TRACKED_JOBS = 64;
+// Caps how many goals one batched request may resolve, so a single call cannot
+// drive an unbounded amount of Agda work or response size.
+export const DEFAULT_MAX_BATCH_GOALS = 32;
 export const DEFAULT_PROGRESS_INTERVAL_MS = 2_000;
 // The normalized-plus-native-raw contract is part of the published API, so
 // the transcript ships by default; includeRaw: false is the opt-in optimization.
@@ -64,6 +67,7 @@ export interface ServerOptions {
   readonly maxTrackedJobs?: number;
   readonly progressIntervalMs?: number;
   readonly includeRawByDefault?: boolean;
+  readonly maxBatchGoals?: number;
 }
 
 export interface ResolvedWorkspaceOverrideOptions {
@@ -102,6 +106,7 @@ export interface ResolvedServerOptions {
   readonly maxTrackedJobs: number;
   readonly progressIntervalMs: number;
   readonly includeRawByDefault: boolean;
+  readonly maxBatchGoals: number;
 }
 
 const SERVER_OPTION_KEYS = new Set([
@@ -132,6 +137,7 @@ const SERVER_OPTION_KEYS = new Set([
   "maxTrackedJobs",
   "progressIntervalMs",
   "includeRawByDefault",
+  "maxBatchGoals",
 ]);
 
 const WORKSPACE_OPTION_KEYS = new Set([
@@ -385,6 +391,7 @@ export function parseServerOptions(input: unknown = {}): ResolvedServerOptions {
     maxTrackedJobs: positiveInteger(input, "maxTrackedJobs", DEFAULT_MAX_TRACKED_JOBS, "options"),
     progressIntervalMs: positiveInteger(input, "progressIntervalMs", DEFAULT_PROGRESS_INTERVAL_MS, "options"),
     includeRawByDefault: booleanValue(input, "includeRawByDefault", DEFAULT_INCLUDE_RAW, "options"),
+    maxBatchGoals: positiveInteger(input, "maxBatchGoals", DEFAULT_MAX_BATCH_GOALS, "options"),
     ...(libraryFile === undefined ? {} : { libraryFile }),
   };
   return Object.freeze(result);

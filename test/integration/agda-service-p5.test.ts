@@ -84,8 +84,8 @@ test("live refine and auto previews are non-mutating and applicable in all sourc
       assert.deepEqual(await readFile(modulePath), before, `${operation} wrote ${name}`);
       assert.equal(preview.data.edits.length, 1, `${operation} did not solve ${name}`);
       assert.equal(preview.data.restoredRevision, loaded.data.revision + 1);
-      // The preview restored identical bytes, so the handle is reissued as-is.
-      assert.equal(preview.data.goals[0]?.handle, goal as string);
+      // The restore reload starts a new generation, so handles rotate.
+      assert.notEqual(preview.data.goals[0]?.handle, goal as string);
       assert.notEqual(preview.raw.restore, undefined);
       await applyAndTypecheck(service, loaded.data.workspace, modulePath, preview.data.edits[0]);
     }
@@ -118,8 +118,8 @@ test("live case split previews preserve all formats and produce typecheckable cl
       assert.equal(preview.data.edits.length, 1);
       assert.match(preview.data.edits[0]?.replacement ?? "", /not true/u);
       assert.match(preview.data.edits[0]?.replacement ?? "", /not false/u);
-      // The preview restored identical bytes, so the handle is reissued as-is.
-      assert.equal(preview.data.goals[0]?.handle, goal as string);
+      // The restore reload starts a new generation, so handles rotate.
+      assert.notEqual(preview.data.goals[0]?.handle, goal as string);
       await applyAndTypecheck(service, loaded.data.workspace, modulePath, preview.data.edits[0]);
     }
   } finally {
