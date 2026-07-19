@@ -375,6 +375,7 @@ of the software.
 
 ## Design and license
 
+- [Changelog](./CHANGELOG.md)
 - [Initial design](./DESIGN.md)
 - [Implementation plan](./IMPLEMENTATION_PLAN.md)
 - [MIT license](./LICENSE)
