@@ -186,6 +186,45 @@ schema properties, and queue-policy properties. Defaults are 1,000 cases per
 property and 5,000 corpus mutations. Longer campaigns can be configured with
 `AGDA_MCP_PROPERTY_RUNS`, `AGDA_MCP_FUZZ_RUNS`, and `AGDA_MCP_FUZZ_SEED`.
 
+## Releasing
+
+Subsequent releases are published to npm and GitHub by
+`.github/workflows/release.yml`. Before using the workflow for the first time,
+configure the `agda-mcp` package on npmjs.com with this trusted publisher:
+
+- Provider: GitHub Actions
+- Organization or user: `peterthiemann`
+- Repository: `agda-mcp`
+- Workflow filename: `release.yml`
+- Environment: none
+- Allowed action: `npm publish`
+
+No npm token or GitHub Actions secret is required. The workflow uses a
+short-lived OpenID Connect credential and npm automatically records provenance
+for the public package.
+
+For a release, update `package.json` and `package-lock.json` to the intended
+version, commit and push that change, then push an annotated tag named
+`release-X.Y` or `release-X.Y.Z`. The two-part form is normalized to `X.Y.0`;
+the resulting version must match `package.json` exactly. For example:
+
+```sh
+npm version 0.2.0 --no-git-tag-version
+git add package.json package-lock.json
+git commit -m "Release 0.2.0"
+git push
+git tag -a release-0.2.0 -m "Release 0.2.0"
+git push origin release-0.2.0
+```
+
+The tag workflow validates the version, installs from the lockfile, runs the
+typecheck and complete test suite, builds and smoke-tests the executable, packs
+the exact tarball, publishes that tarball to npm through trusted publishing,
+and finally creates the GitHub release with the tarball and its SHA-256 file.
+Merely changing or pushing the workflow does not publish a package; only a new
+matching `release-*` tag triggers it. npm versions are immutable, so verify the
+version before pushing the tag.
+
 ## Genesis and Codex involvement
 
 This project began as a design dialogue between Peter Thiemann and OpenAI
