@@ -4,12 +4,15 @@
 interaction protocol. It will support on-disk `.agda`, `.lagda`, and
 `.lagda.md` modules through a long-lived Agda subprocess per workspace.
 
-The repository currently implements P0 through P3 of the
+The repository currently implements P0 through P5 of the
 [implementation plan](./IMPLEMENTATION_PLAN.md): package/discovery foundations,
 the Agda 2.8.0 protocol host, workspace sessions and opaque goal handles, and
 the first stdio MCP tools (`agda_server_info`, `agda_load_module`, and
-`agda_typecheck`). The transport-independent service also implements the P4
-goal, context, constraint, metavariable, normalization, and inference queries.
+`agda_typecheck`). The transport-independent service implements goal, context,
+constraint, metavariable, normalization, and inference queries, plus
+non-mutating case-split, refine, and auto previews. Every transformation
+preview reloads the module, rotates goal handles, and returns a separate restore
+transcript.
 
 ## Requirements
 

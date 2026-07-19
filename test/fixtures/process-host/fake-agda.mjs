@@ -83,6 +83,32 @@ lines.on("line", (line) => {
     return;
   }
 
+  if (line.includes("Cmd_refine_or_intro")) {
+    if (line.includes("reject-preview")) {
+      respond([{ kind: "DisplayInfo", info: { kind: "Error", error: { message: "Rejected preview" } } }]);
+      return;
+    }
+    const reply = () => respond([{ kind: "GiveAction", interactionPoint: { id: 0, range: [] }, giveResult: { str: "x" } }]);
+    if (line.includes("slow-preview")) setTimeout(reply, 150);
+    else reply();
+    return;
+  }
+
+  if (line.includes("Cmd_autoOne")) {
+    respond([{ kind: "GiveAction", interactionPoint: { id: 0, range: [] }, giveResult: { str: "x" } }]);
+    return;
+  }
+
+  if (line.includes("Cmd_make_case")) {
+    respond([{
+      kind: "MakeCase",
+      interactionPoint: { id: 0, range: [] },
+      variant: "Function",
+      clauses: ["id true = false", "id false = true"],
+    }]);
+    return;
+  }
+
   if (line.includes("Cmd_compute_toplevel") && line.includes("stderr-flood")) {
     process.stderr.write("e".repeat(8192));
     return;

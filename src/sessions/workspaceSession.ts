@@ -6,6 +6,9 @@ import type {
   GoalSummary,
   ModuleCheckResult,
   NormalizedResult,
+  RawAgdaResponse,
+  RawCommandTranscript,
+  SourceFormat,
   WorkspaceHandle,
   WorkspaceSessionSummary,
 } from "../application/domain.js";
@@ -55,6 +58,20 @@ export interface SessionQueryState {
 
 export interface GoalSessionQueryState extends SessionQueryState {
   readonly goal: GoalRecord;
+}
+
+export interface PreviewPlanningContext {
+  readonly modulePath: string;
+  readonly sourceFormat: SourceFormat;
+  readonly source: string;
+  readonly sourceFingerprint: string;
+  readonly goalRange: GoalSummary["range"];
+}
+
+export interface PreviewTransactionResult<T> {
+  readonly proposal: T;
+  readonly restored: NormalizedResult<ModuleCheckResult>;
+  readonly raw: RawAgdaResponse;
 }
 
 export interface WorkspaceSessionOptions {
@@ -253,6 +270,87 @@ export class WorkspaceSession {
     }, options.signal);
   }
 
+  previewGoal<T>(
+    handle: string,
+    command: (goal: GoalRecord) => AgdaCommand,
+    planner: (events: readonly unknown[], context: PreviewPlanningContext) => T,
+    options: SendCommandOptions = {},
+  ): Promise<PreviewTransactionResult<T>> {
+    return this.#queue.enqueue(async () => {
+      const active = this.#active;
+      if (active === undefined) {
+        throw new ApplicationError("STALE_GOAL_HANDLE", "Workspace has no active goal state");
+      }
+      await this.assertSourceUnchanged();
+      const goal = this.resolveGoal(handle);
+      let protocol: ProtocolCommandResult | undefined;
+      let proposal: T | undefined;
+      let operationError: unknown;
+      let operationAttempted = false;
+
+      try {
+        operationAttempted = true;
+        protocol = await this.#host.sendCommand(
+          command(goal),
+          { currentFile: active.plan.modulePath },
+          options,
+        );
+        const current = await readSnapshot(active.plan.modulePath);
+        if (current.fingerprint !== active.snapshot.fingerprint) {
+          throw sourceChangedError(active, current.fingerprint);
+        }
+        proposal = planner(
+          protocol.raw.events,
+          Object.freeze({
+            modulePath: active.plan.modulePath,
+            sourceFormat: active.plan.sourceFormat,
+            source: active.snapshot.text,
+            sourceFingerprint: active.snapshot.fingerprint,
+            goalRange: goal.range,
+          }),
+        );
+      } catch (error: unknown) {
+        operationError = error;
+      }
+
+      let restored: NormalizedResult<ModuleCheckResult>;
+      try {
+        if (!operationAttempted) throw operationError;
+        restored = await this.#loadNow(active.plan);
+      } catch (restoreError: unknown) {
+        this.#active = undefined;
+        this.#goals.revokeAll();
+        this.#lifecycle = "stopped";
+        await this.#host.terminate().catch(() => undefined);
+        throw new ApplicationError(
+          "RESTORE_FAILED",
+          "Agda state could not be restored after the transformation preview",
+          {
+            cause: restoreError,
+            details: {
+              modulePath: active.plan.modulePath,
+              operationError: errorDescription(operationError),
+              restoreError: errorDescription(restoreError),
+            },
+          },
+        );
+      }
+
+      if (operationError !== undefined) throw operationError;
+      if (protocol === undefined || proposal === undefined) {
+        throw new ApplicationError(
+          "UNSUPPORTED_AGDA_PROTOCOL",
+          "Agda returned no transformation proposal",
+        );
+      }
+      return Object.freeze({
+        proposal,
+        restored,
+        raw: withRestoreTranscript(protocol.raw, restored.raw),
+      });
+    }, options.signal);
+  }
+
   async terminate(): Promise<void> {
     this.#queue.close();
     this.#goals.revokeAll();
@@ -339,4 +437,38 @@ export class WorkspaceSession {
       protocol,
     });
   }
+}
+
+function sourceChangedError(active: ActiveModuleState, actualFingerprint: string): ApplicationError {
+  return new ApplicationError("SOURCE_CHANGED", "The active Agda source changed during the preview", {
+    details: {
+      modulePath: active.plan.modulePath,
+      expectedSourceFingerprint: active.snapshot.fingerprint,
+      actualSourceFingerprint: actualFingerprint,
+    },
+  });
+}
+
+function rawCommandTranscript(raw: RawAgdaResponse): RawCommandTranscript {
+  return Object.freeze({
+    events: raw.events,
+    complete: raw.complete,
+    capturedBytes: raw.capturedBytes,
+    totalBytes: raw.totalBytes,
+    omittedEventCount: raw.omittedEventCount,
+    stderr: raw.stderr,
+    ...(raw.omittedSha256 === undefined ? {} : { omittedSha256: raw.omittedSha256 }),
+  });
+}
+
+function withRestoreTranscript(
+  operation: RawAgdaResponse,
+  restore: RawAgdaResponse,
+): RawAgdaResponse {
+  return Object.freeze({ ...operation, restore: rawCommandTranscript(restore) });
+}
+
+function errorDescription(error: unknown): string | undefined {
+  if (error === undefined) return undefined;
+  return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
 }

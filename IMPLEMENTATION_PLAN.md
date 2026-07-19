@@ -309,45 +309,45 @@ and MCP schema tests before proceeding to the next.
 
 ### 8.1 Source-format analysis
 
-- [ ] Represent plain, literate TeX, and literate Markdown code regions against
+- [x] Represent plain, literate TeX, and literate Markdown code regions against
   the full source snapshot.
-- [ ] Recognize `\begin{code}` / `\end{code}` regions in `.lagda`.
-- [ ] Recognize fenced Agda code regions in `.lagda.md` while preserving fence
+- [x] Recognize `\begin{code}` / `\end{code}` regions in `.lagda`.
+- [x] Recognize fenced Agda code regions in `.lagda.md` while preserving fence
   markers, indentation, and prose.
-- [ ] Reject a proposed edit that crosses or cannot be mapped to one code
+- [x] Reject a proposed edit that crosses or cannot be mapped to one code
   region with `UNSUPPORTED_EDIT_SHAPE`.
 
 ### 8.2 Edit planning
 
-- [ ] Convert `GiveAction` into an edit replacing the exact goal range.
-- [ ] Convert `MakeCase` `Function` clauses into a replacement for the enclosing
+- [x] Convert `GiveAction` into an edit replacing the exact goal range.
+- [x] Convert `MakeCase` `Function` clauses into a replacement for the enclosing
   clause with existing indentation.
-- [ ] Support extended-lambda case responses where the target range is
+- [x] Support extended-lambda case responses where the target range is
   unambiguous; otherwise return `UNSUPPORTED_EDIT_SHAPE`.
-- [ ] Attach the active module path and expected source fingerprint to every
+- [x] Attach the active module path and expected source fingerprint to every
   edit.
-- [ ] Never write a source file from `EditPlanner` or any initial MCP tool.
+- [x] Never write a source file from `EditPlanner` or any initial MCP tool.
 
 ### 8.3 Transaction runner
 
-- [ ] Implement a common preview transaction for case split, refine, and auto.
-- [ ] Validate handle and fingerprint immediately before the operation.
-- [ ] Run the proposal command under the workspace queue.
-- [ ] Recheck the source fingerprint after receiving the proposal.
-- [ ] Always reload the unchanged active module after a proposal command has
+- [x] Implement a common preview transaction for case split, refine, and auto.
+- [x] Validate handle and fingerprint immediately before the operation.
+- [x] Run the proposal command under the workspace queue.
+- [x] Recheck the source fingerprint after receiving the proposal.
+- [x] Always reload the unchanged active module after a proposal command has
   reached Agda, including unsuccessful or partially failed operations.
-- [ ] Normalize restored state, increment revision, revoke old handles, and
+- [x] Normalize restored state, increment revision, revoke old handles, and
   issue fresh handles.
-- [ ] Return separate operation and restore raw transcripts, each with its own
+- [x] Return separate operation and restore raw transcripts, each with its own
   budgets.
-- [ ] If restoration fails, terminate the process, invalidate the session, and
+- [x] If restoration fails, terminate the process, invalidate the session, and
   return `RESTORE_FAILED` without marking the edit safe to apply.
 
 ### 8.4 Transformation tools
 
-- [ ] `agda_case_split` with an optional pattern-variable string.
-- [ ] `agda_refine` with optional expression and pattern-lambda choice.
-- [ ] `agda_auto` with optional proof-search query.
+- [x] `agda_case_split` with an optional pattern-variable string.
+- [x] `agda_refine` with optional expression and pattern-lambda choice.
+- [x] `agda_auto` with optional proof-search query.
 
 ### 8.5 P5 tests and gate
 

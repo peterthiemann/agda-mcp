@@ -43,6 +43,11 @@ import {
   normalizeInferredTypeResponse,
   normalizeMetasResponse,
 } from "../normalization/responses.js";
+import {
+  planAutoEdit,
+  planCaseSplitEdit,
+  planRefineEdit,
+} from "../normalization/editPlanner.js";
 
 const REWRITE_MODES = new Set<RewriteMode>([
   "as_is",
@@ -217,25 +222,93 @@ export class AgdaApplicationService implements AgdaService {
     );
   }
 
-  caseSplit(
-    _request: CaseSplitRequest,
-    _context?: OperationContext,
+  async caseSplit(
+    request: CaseSplitRequest,
+    context?: OperationContext,
   ): Promise<NormalizedResult<EditPreviewResult>> {
-    return notImplemented("agda_case_split");
+    validateGoalHandle(request.goal);
+    validateOptionalString(request.variables, "variables");
+    const session = this.#sessions.requireGoal(request.goal);
+    const transaction = await session.previewGoal(
+      request.goal,
+      (goal) => ({
+        kind: "makeCase",
+        interactionPoint: goal.interactionPoint,
+        range: goal.protocolRange,
+        ...(request.variables === undefined ? {} : { variables: request.variables }),
+      }),
+      planCaseSplitEdit,
+      signalOptions(context),
+    );
+    return transformationResult(
+      transaction.proposal.edits,
+      transaction.restored,
+      transaction.raw,
+    );
   }
 
-  refine(
-    _request: RefineRequest,
-    _context?: OperationContext,
+  async refine(
+    request: RefineRequest,
+    context?: OperationContext,
   ): Promise<NormalizedResult<EditPreviewResult>> {
-    return notImplemented("agda_refine");
+    validateGoalHandle(request.goal);
+    validateOptionalString(request.expression, "expression");
+    if (request.usePatternLambda !== undefined && typeof request.usePatternLambda !== "boolean") {
+      throw new ApplicationError("INVALID_ARGUMENT", "usePatternLambda must be a boolean");
+    }
+    const session = this.#sessions.requireGoal(request.goal);
+    const transaction = await session.previewGoal(
+      request.goal,
+      (goal) => ({
+        kind: "refineOrIntro",
+        interactionPoint: goal.interactionPoint,
+        range: goal.protocolRange,
+        ...(request.expression === undefined ? {} : { expression: request.expression }),
+        ...(request.usePatternLambda === undefined
+          ? {}
+          : { usePatternLambda: request.usePatternLambda }),
+      }),
+      (events, planningContext) =>
+        planRefineEdit(events, planningContext, request.expression),
+      signalOptions(context),
+    );
+    return transformationResult(
+      transaction.proposal.edits,
+      transaction.restored,
+      transaction.raw,
+    );
   }
 
-  auto(
-    _request: AutoRequest,
-    _context?: OperationContext,
+  async auto(
+    request: AutoRequest,
+    context?: OperationContext,
   ): Promise<NormalizedResult<AutoResult>> {
-    return notImplemented("agda_auto");
+    validateGoalHandle(request.goal);
+    validateOptionalString(request.query, "query");
+    const session = this.#sessions.requireGoal(request.goal);
+    const transaction = await session.previewGoal(
+      request.goal,
+      (goal) => ({
+        kind: "autoOne",
+        interactionPoint: goal.interactionPoint,
+        range: goal.protocolRange,
+        ...(request.query === undefined ? {} : { query: request.query }),
+      }),
+      planAutoEdit,
+      signalOptions(context),
+    );
+    const base = editPreviewData(transaction.proposal.edits, transaction.restored);
+    return Object.freeze({
+      data: Object.freeze({
+        ...base,
+        found: transaction.proposal.found,
+        ...(transaction.proposal.message === undefined
+          ? {}
+          : { message: transaction.proposal.message }),
+      }),
+      warnings: transaction.restored.warnings,
+      raw: transaction.raw,
+    });
   }
 
   async normalizeExpression(
@@ -350,16 +423,45 @@ export class AgdaApplicationService implements AgdaService {
   }
 }
 
-function notImplemented<T>(tool: string): Promise<T> {
-  return Promise.reject(
-    new ApplicationError("UNSUPPORTED_AGDA_PROTOCOL", `${tool} is not implemented yet`, {
-      details: { tool },
-    }),
-  );
-}
-
 function signalOptions(context: OperationContext | undefined): { signal?: AbortSignal } {
   return context?.signal === undefined ? {} : { signal: context.signal };
+}
+
+function validateGoalHandle(goal: string): void {
+  if (typeof goal !== "string" || goal.trim() === "") {
+    throw new ApplicationError("INVALID_ARGUMENT", "goal must be a non-empty string");
+  }
+}
+
+function validateOptionalString(value: unknown, name: string): void {
+  if (value !== undefined && typeof value !== "string") {
+    throw new ApplicationError("INVALID_ARGUMENT", `${name} must be a string`);
+  }
+}
+
+function editPreviewData(
+  edits: EditPreviewResult["edits"],
+  restored: NormalizedResult<ModuleCheckResult>,
+): EditPreviewResult {
+  return Object.freeze({
+    workspace: restored.data.workspace,
+    modulePath: restored.data.modulePath,
+    edits,
+    restoredRevision: restored.data.revision,
+    goals: restored.data.goals,
+  });
+}
+
+function transformationResult(
+  edits: EditPreviewResult["edits"],
+  restored: NormalizedResult<ModuleCheckResult>,
+  raw: RawAgdaResponse,
+): NormalizedResult<EditPreviewResult> {
+  return Object.freeze({
+    data: editPreviewData(edits, restored),
+    warnings: restored.warnings,
+    raw,
+  });
 }
 
 function result<T>(

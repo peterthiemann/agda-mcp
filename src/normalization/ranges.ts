@@ -85,3 +85,44 @@ export function normalizeAgdaRange(source: string, value: unknown): SourceRange 
   }
   return Object.freeze({ start, end });
 }
+
+export function sourcePositionAtUtf16Offset(source: string, utf16Offset: number): SourcePosition {
+  if (!Number.isSafeInteger(utf16Offset) || utf16Offset < 0 || utf16Offset > source.length) {
+    throw new ApplicationError("UNSUPPORTED_EDIT_SHAPE", "Source offset is outside the snapshot", {
+      details: { utf16Offset, sourceLength: source.length },
+    });
+  }
+  let line = 1;
+  let column = 1;
+  let offset = 0;
+  for (const character of source) {
+    if (offset === utf16Offset) return Object.freeze({ line, column, utf16Offset });
+    if (offset + character.length > utf16Offset) {
+      throw new ApplicationError("UNSUPPORTED_EDIT_SHAPE", "Source offset splits a Unicode character", {
+        details: { utf16Offset },
+      });
+    }
+    offset += character.length;
+    if (character === "\n") {
+      line += 1;
+      column = 1;
+    } else {
+      column += 1;
+    }
+  }
+  return Object.freeze({ line, column, utf16Offset });
+}
+
+export function sourceRangeFromUtf16Offsets(
+  source: string,
+  start: number,
+  end: number,
+): SourceRange {
+  if (end < start) {
+    throw new ApplicationError("UNSUPPORTED_EDIT_SHAPE", "Source range end precedes its start");
+  }
+  return Object.freeze({
+    start: sourcePositionAtUtf16Offset(source, start),
+    end: sourcePositionAtUtf16Offset(source, end),
+  });
+}
