@@ -365,21 +365,21 @@ and MCP schema tests before proceeding to the next.
 
 ### 9.1 Tool schemas
 
-- [ ] Register all twelve names exactly as specified in the design.
-- [ ] Use strict input schemas and reject unknown or contradictory selector
+- [x] Register all twelve names exactly as specified in the design.
+- [x] Use strict input schemas and reject unknown or contradictory selector
   combinations.
-- [ ] Return normalized data as structured tool output with `raw` included.
-- [ ] Map application error codes consistently into MCP tool errors without
+- [x] Return normalized data as structured tool output with `raw` included.
+- [x] Map application error codes consistently into MCP tool errors without
   exposing stack traces by default.
-- [ ] Include actionable recovery guidance for stale handles, changed sources,
+- [x] Include actionable recovery guidance for stale handles, changed sources,
   unavailable sessions, and incompatible Agda protocols.
 
 ### 9.2 Transport behavior
 
-- [ ] Convert MCP cancellation into queue cancellation or active-command abort.
-- [ ] Ensure logs and child diagnostics use stderr only.
-- [ ] Add a test that fails on any non-MCP byte written to stdout.
-- [ ] Keep transport code limited to schema validation, request mapping,
+- [x] Convert MCP cancellation into queue cancellation or active-command abort.
+- [x] Ensure logs and child diagnostics use stderr only.
+- [x] Add a test that fails on any non-MCP byte written to stdout.
+- [x] Keep transport code limited to schema validation, request mapping,
   cancellation, and response/error mapping.
 
 ### 9.3 P6 tests and gate

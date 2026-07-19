@@ -23,7 +23,7 @@ const INSTALLATION: AgdaInstallation = Object.freeze({
   warnings: Object.freeze([]),
 });
 
-test("the MCP SDK lists and invokes the first vertical tool slice", async () => {
+test("the MCP SDK lists the complete surface and invokes the first vertical slice", async () => {
   const service = await AgdaApplicationService.create(
     parseServerOptions({ workspaceRoots: [FIXTURE_ROOT], commandTimeoutMs: 2_000 }),
     {
@@ -45,7 +45,20 @@ test("the MCP SDK lists and invokes the first vertical tool slice", async () => 
     const tools = await client.listTools();
     assert.deepEqual(
       tools.tools.map((tool) => tool.name).sort(),
-      ["agda_load_module", "agda_server_info", "agda_typecheck"],
+      [
+        "agda_auto",
+        "agda_case_split",
+        "agda_infer_type",
+        "agda_load_module",
+        "agda_normalize_expression",
+        "agda_query_metavariables",
+        "agda_refine",
+        "agda_retrieve_constraints",
+        "agda_retrieve_context",
+        "agda_retrieve_goals",
+        "agda_server_info",
+        "agda_typecheck",
+      ],
     );
 
     const info = await client.callTool({ name: "agda_server_info", arguments: {} });
