@@ -325,7 +325,9 @@ export class AgdaProcessHost {
         return;
       }
       const active = this.#active;
-      if (active !== undefined) this.#completeActive(active);
+      // stdout and stderr are separate pipes. Yield once so stderr written by
+      // Agda before the prompt can be delivered before the transcript closes.
+      if (active !== undefined) setImmediate(() => this.#completeActive(active));
       return;
     }
 
