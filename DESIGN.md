@@ -255,18 +255,35 @@ workspace revision changes after every reload or recovery.
 
 ### 8.2 Opaque goal handles
 
-A goal handle is an unguessable token backed by a server-side table. Clients do
-not see or provide bare Agda interaction-point IDs. A handle is valid only when:
+A goal handle is an unguessable random token backed by a server-side table.
+Clients do not see or provide bare Agda interaction-point IDs. Handles are
+never derived from goal content: a derived token could be reconstructed after
+the table had deliberately dropped it, which would let a handle come back to
+life after switching away from and back to a module.
+
+A handle is valid only when:
 
 - its workspace session still exists;
 - its module is still the active module;
-- its revision equals the current revision;
+- its load generation equals the current generation;
 - the source fingerprint still matches; and
 - its interaction point is still present.
 
-Loading another module, reloading, recovering a process, or completing a
-transformation preview invalidates all existing handles. Stale use fails with
-`STALE_GOAL_HANDLE` and does not reach Agda.
+A *load generation* identifies one externally observable Agda state. It
+advances on every load, typecheck, module switch and process recovery, so all
+of those invalidate existing handles — unchanged top-level source does not
+imply unchanged imported dependencies or unchanged Agda state, so nothing
+weaker would be sound.
+
+The internal restore reload that a transformation preview performs advances
+the generation too. It replays byte-identical top-level source, but an imported
+module may have changed during the reload, so the resulting Agda state is not
+guaranteed to match and the old handles cannot be assumed to denote the same
+goals. The transaction returns freshly issued goals for the caller to use
+instead. Preserving handles across that reload could be reconsidered given a
+reliable digest of the full dependency state.
+
+Stale use fails with `STALE_GOAL_HANDLE` and does not reach Agda.
 
 ### 8.3 External source changes
 

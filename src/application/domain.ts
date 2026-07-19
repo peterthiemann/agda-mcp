@@ -147,6 +147,24 @@ export interface ContextResult {
   readonly boundary?: BoundarySummary;
 }
 
+export interface ContextsEntry {
+  readonly goal: GoalHandle;
+  readonly ok: boolean;
+  readonly context?: ContextResult;
+  readonly error?: {
+    readonly code: string;
+    readonly message: string;
+    readonly recoverable: boolean;
+  };
+}
+
+export interface ContextsResult {
+  readonly requested: number;
+  readonly succeeded: number;
+  readonly failed: number;
+  readonly contexts: readonly ContextsEntry[];
+}
+
 export interface ConstraintsResult {
   readonly workspace: WorkspaceHandle;
   readonly constraints: readonly ConstraintSummary[];
@@ -209,6 +227,11 @@ export interface RetrieveContextRequest extends GoalRequest {
   readonly rewrite?: RewriteMode;
 }
 
+export interface RetrieveContextsRequest {
+  readonly goals: readonly GoalHandle[];
+  readonly rewrite?: RewriteMode;
+}
+
 export interface CaseSplitRequest extends GoalRequest {
   readonly variables?: string;
 }
@@ -238,4 +261,6 @@ export interface InferTypeRequest extends ScopedExpressionRequest {
 
 export interface OperationContext {
   readonly signal?: AbortSignal;
+  /** Per-call override of the configured Agda command timeout. */
+  readonly timeoutMs?: number;
 }

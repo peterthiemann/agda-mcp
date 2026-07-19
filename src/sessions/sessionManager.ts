@@ -9,6 +9,7 @@ import { ApplicationError } from "../application/errors.js";
 import type { AgdaInstallation } from "../discovery/agdaInstallation.js";
 import { discoverModulePlan } from "../discovery/projectResolver.js";
 import type { AgdaProtocolAdapter } from "../protocol/adapter.js";
+import type { SendCommandOptions } from "../protocol/processHost.js";
 import {
   WorkspaceSession,
   type ProcessHostFactory,
@@ -40,7 +41,7 @@ export class WorkspaceSessionManager {
 
   async loadModule(
     modulePath: string,
-    signal?: AbortSignal,
+    options: SendCommandOptions = {},
   ): Promise<NormalizedResult<ModuleCheckResult>> {
     const plan = await discoverModulePlan(
       modulePath,
@@ -59,14 +60,14 @@ export class WorkspaceSessionManager {
       this.#byRoot.set(plan.projectRoot, session);
       this.#byHandle.set(session.handle, session);
     }
-    return session.load(plan, signal);
+    return session.load(plan, options);
   }
 
   typecheck(
     workspace: WorkspaceHandle,
-    signal?: AbortSignal,
+    options: SendCommandOptions = {},
   ): Promise<NormalizedResult<ModuleCheckResult>> {
-    return this.require(workspace).typecheck(signal);
+    return this.require(workspace).typecheck(options);
   }
 
   require(workspace: WorkspaceHandle): WorkspaceSession {

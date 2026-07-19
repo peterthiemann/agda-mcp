@@ -45,6 +45,7 @@ test("reloads keep workspace identity while rotating revisions and goal handles"
     const checked = await manager.typecheck(loaded.data.workspace);
     assert.equal(checked.data.workspace, loaded.data.workspace);
     assert.equal(checked.data.revision, loaded.data.revision + 1);
+    // A reload starts a new load generation, so prior handles are revoked.
     assert.notEqual(checked.data.goals[0]?.handle, oldGoal);
     assert.throws(
       () => manager.require(loaded.data.workspace).resolveGoal(oldGoal as string),

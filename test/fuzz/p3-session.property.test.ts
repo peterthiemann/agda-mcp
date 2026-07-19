@@ -31,7 +31,7 @@ test("property: goal handles validate only against their complete bound state", 
       fc.string({ unit: "binary", minLength: 1, maxLength: 32 }),
       fc.string({ unit: "binary", minLength: 1, maxLength: 32 }),
       fc.nat({ max: 10_000 }),
-      (workspaceSuffix, moduleSuffix, revision) => {
+      (workspaceSuffix, moduleSuffix, generation) => {
         const table = new GoalHandleTable();
         const workspace = `workspace_${workspaceSuffix}`;
         const modulePath = `/workspace/${moduleSuffix}.agda`;
@@ -47,7 +47,8 @@ test("property: goal handles validate only against their complete bound state", 
         const handle = table.issue({
           workspace,
           modulePath,
-          revision,
+          revision: generation,
+          generation,
           sourceFingerprint: "fingerprint",
           interactionPoint: 7,
           range,
@@ -56,16 +57,22 @@ test("property: goal handles validate only against their complete bound state", 
         const current = {
           workspace,
           modulePath,
-          revision,
+          generation,
           sourceFingerprint: "fingerprint",
           interactionPoints: new Set([7]),
         };
         assert.equal(table.validate(handle, current).interactionPoint, 7);
-        assert.throws(
-          () => table.validate(handle, { ...current, revision: revision + 1 }),
-          (error: unknown) =>
-            error instanceof ApplicationError && error.code === "STALE_GOAL_HANDLE",
-        );
+        const stale = (patch: Partial<typeof current>) =>
+          assert.throws(
+            () => table.validate(handle, { ...current, ...patch }),
+            (error: unknown) =>
+              error instanceof ApplicationError && error.code === "STALE_GOAL_HANDLE",
+          );
+        stale({ generation: generation + 1 });
+        stale({ workspace: `${workspace}_other` });
+        stale({ modulePath: `${modulePath}x` });
+        stale({ sourceFingerprint: "other" });
+        stale({ interactionPoints: new Set([8]) });
         table.revokeAll();
         assert.throws(() => table.validate(handle, current));
       },

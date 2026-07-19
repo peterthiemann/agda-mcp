@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 
+import { DEFAULT_ABORT_GRACE_MS } from "../application/config.js";
 import { ApplicationError } from "../application/errors.js";
 import type {
   AgdaCommand,
@@ -247,7 +248,7 @@ export class AgdaProcessHost {
       active.abortSent = true;
       const encoded = this.#options.adapter.encodeCommand({ kind: "abort" }, active.context);
       this.#child.stdin.write(encoded, "utf8");
-      const graceMs = this.#options.policy.abortGraceMs ?? 1_000;
+      const graceMs = this.#options.policy.abortGraceMs ?? DEFAULT_ABORT_GRACE_MS;
       active.abortGrace = setTimeout(() => void this.terminate(), graceMs);
       active.abortGrace.unref();
     }

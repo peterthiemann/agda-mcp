@@ -29,7 +29,11 @@ export interface ProbeResult {
 export type ProbeRunner = (
   executable: string,
   arguments_: readonly string[],
-  options: { readonly timeoutMs: number; readonly signal?: AbortSignal },
+  options: {
+    readonly timeoutMs: number;
+    readonly maxBufferBytes: number;
+    readonly signal?: AbortSignal;
+  },
 ) => Promise<ProbeResult>;
 
 export interface InstallationDiscoveryDependencies {
@@ -45,7 +49,7 @@ const defaultRunner: ProbeRunner = async (executable, arguments_, options) => {
     encoding: "utf8",
     shell: false,
     timeout: options.timeoutMs,
-    maxBuffer: 1024 * 1024,
+    maxBuffer: options.maxBufferBytes,
     ...(options.signal === undefined ? {} : { signal: options.signal }),
   });
   return { stdout: result.stdout, stderr: result.stderr };
@@ -101,11 +105,13 @@ async function runProbe(
   executable: string,
   argument: string,
   timeoutMs: number,
+  maxBufferBytes: number,
   signal?: AbortSignal,
 ): Promise<string> {
   try {
     const result = await runner(executable, [argument], {
       timeoutMs,
+      maxBufferBytes,
       ...(signal === undefined ? {} : { signal }),
     });
     const value = result.stdout.trim();
@@ -129,10 +135,12 @@ export async function discoverAgdaInstallation(
 ): Promise<AgdaInstallation> {
   const executable = await resolveAgdaExecutable(options.agdaExecutable, dependencies);
   const runner = dependencies.runner ?? defaultRunner;
+  const probe = (argument: string): Promise<string> =>
+    runProbe(runner, executable, argument, options.probeTimeoutMs, options.probeMaxBufferBytes, signal);
   const [version, applicationDirectory, dataDirectory] = await Promise.all([
-    runProbe(runner, executable, "--numeric-version", options.commandTimeoutMs, signal),
-    runProbe(runner, executable, "--print-agda-app-dir", options.commandTimeoutMs, signal),
-    runProbe(runner, executable, "--print-agda-data-dir", options.commandTimeoutMs, signal),
+    probe("--numeric-version"),
+    probe("--print-agda-app-dir"),
+    probe("--print-agda-data-dir"),
   ]);
   const compatibility: CompatibilityStatus =
     version === BASELINE_AGDA_VERSION ? "supported" : "unverified";

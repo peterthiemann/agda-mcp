@@ -63,6 +63,7 @@ test("unexpected exit invalidates handles and lazily reloads an unchanged module
 
     const checked = await fixture.service.typecheck({ workspace: loaded.data.workspace });
     assert.equal(checked.data.revision, loaded.data.revision + 1);
+    // Recovery is a fresh load generation, so prior handles do not survive it.
     assert.notEqual(checked.data.goals[0]?.handle, goal);
     assert.equal(fixture.hosts.length, 2);
     assert.equal(fixture.hosts[0]?.state, "stopped");

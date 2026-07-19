@@ -53,6 +53,7 @@ test("transformation previews preserve bytes, restore state, and rotate handles"
     assert.equal(preview.data.restoredRevision, loaded.data.revision + 1);
     assert.equal(preview.data.edits[0]?.replacement, "x");
     assert.equal(preview.data.edits[0]?.expectedSourceFingerprint, loaded.data.sourceFingerprint);
+    // The restore reload starts a new generation, so the prior handle is gone.
     assert.notEqual(preview.data.goals[0]?.handle, goal);
     assert.notEqual(preview.raw.restore, undefined);
     assert.equal(preview.raw.events.some((event) => (event as { kind?: unknown }).kind === "GiveAction"), true);
@@ -90,13 +91,14 @@ test("a rejected proposal still reloads and rotates the goal state", async () =>
       (error: unknown) => error instanceof ApplicationError && error.code === "AGDA_COMMAND_REJECTED",
     );
     assert.deepEqual(await readFile(testFixture.modulePath), before);
+    const info = await testFixture.service.serverInfo();
+    assert.equal(info.data.workspaces[0]?.revision, loaded.data.revision + 1);
+    assert.equal(info.data.workspaces[0]?.lifecycle, "ready");
+    // The reload after rejection also starts a new generation.
     await assert.rejects(
       testFixture.service.auto({ goal: goal as string }),
       (error: unknown) => error instanceof ApplicationError && error.code === "STALE_GOAL_HANDLE",
     );
-    const info = await testFixture.service.serverInfo();
-    assert.equal(info.data.workspaces[0]?.revision, loaded.data.revision + 1);
-    assert.equal(info.data.workspaces[0]?.lifecycle, "ready");
   } finally {
     await testFixture.service.shutdown();
     await rm(testFixture.directory, { recursive: true, force: true });
@@ -116,6 +118,7 @@ test("a source change during preview rejects the proposal after restoring curren
       pending,
       (error: unknown) => error instanceof ApplicationError && error.code === "SOURCE_CHANGED",
     );
+    // The bytes on disk changed, so the pre-change handle must NOT come back.
     await assert.rejects(
       testFixture.service.auto({ goal: goal as string }),
       (error: unknown) => error instanceof ApplicationError && error.code === "STALE_GOAL_HANDLE",

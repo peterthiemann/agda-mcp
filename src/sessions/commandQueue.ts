@@ -1,3 +1,4 @@
+import { DEFAULT_MAX_QUEUED_COMMANDS } from "../application/config.js";
 import { ApplicationError } from "../application/errors.js";
 
 interface QueueEntry<T> {
@@ -14,7 +15,7 @@ export class SerializedCommandQueue {
   #running = false;
   #closed = false;
 
-  constructor(readonly maxPending: number = 64) {
+  constructor(readonly maxPending: number = DEFAULT_MAX_QUEUED_COMMANDS) {
     if (!Number.isSafeInteger(maxPending) || maxPending <= 0) {
       throw new ApplicationError("INVALID_ARGUMENT", "maxPending must be a positive safe integer");
     }

@@ -8,6 +8,28 @@ export const DEFAULT_MAX_QUEUED_COMMANDS = 64;
 export const DEFAULT_RAW_RESPONSE_LIMIT_BYTES = 128 * 1024;
 export const DEFAULT_STDERR_RETURN_LIMIT_BYTES = 32 * 1024;
 export const DEFAULT_MAX_COMMAND_OUTPUT_BYTES = 16 * 1024 * 1024;
+export const DEFAULT_ABORT_GRACE_MS = 1_000;
+export const DEFAULT_PROBE_TIMEOUT_MS = 10_000;
+export const DEFAULT_PROBE_MAX_BUFFER_BYTES = 1024 * 1024;
+export const DEFAULT_HANDLE_ENTROPY_BYTES = 24;
+
+// Deferral changes the shape of a successful tool response, so it is
+// opt-in: enable it globally with asyncMode, or per call with async/deferAfterMs.
+export const DEFAULT_ASYNC_MODE = "never";
+export const DEFAULT_DEFER_AFTER_MS = 2_500;
+export const DEFAULT_MAX_JOB_WAIT_MS = 30_000;
+export const DEFAULT_JOB_RETENTION_MS = 300_000;
+export const DEFAULT_MAX_TRACKED_JOBS = 64;
+// Caps how many goals one batched request may resolve, so a single call cannot
+// drive an unbounded amount of Agda work or response size.
+export const DEFAULT_MAX_BATCH_GOALS = 32;
+export const DEFAULT_PROGRESS_INTERVAL_MS = 2_000;
+// The normalized-plus-native-raw contract is part of the published API, so
+// the transcript ships by default; includeRaw: false is the opt-in optimization.
+export const DEFAULT_INCLUDE_RAW = true;
+
+export const ASYNC_MODES = Object.freeze(["auto", "never", "always"] as const);
+export type AsyncMode = (typeof ASYNC_MODES)[number];
 
 export interface WorkspaceOverrideOptions {
   readonly root: string;
@@ -34,6 +56,18 @@ export interface ServerOptions {
   readonly stderrReturnLimitBytes?: number;
   readonly maxCommandOutputBytes?: number;
   readonly allowAgdaExec?: boolean;
+  readonly abortGraceMs?: number;
+  readonly probeTimeoutMs?: number;
+  readonly probeMaxBufferBytes?: number;
+  readonly handleEntropyBytes?: number;
+  readonly asyncMode?: AsyncMode;
+  readonly deferAfterMs?: number;
+  readonly maxJobWaitMs?: number;
+  readonly jobRetentionMs?: number;
+  readonly maxTrackedJobs?: number;
+  readonly progressIntervalMs?: number;
+  readonly includeRawByDefault?: boolean;
+  readonly maxBatchGoals?: number;
 }
 
 export interface ResolvedWorkspaceOverrideOptions {
@@ -61,6 +95,18 @@ export interface ResolvedServerOptions {
   readonly stderrReturnLimitBytes: number;
   readonly maxCommandOutputBytes: number;
   readonly allowAgdaExec: boolean;
+  readonly abortGraceMs: number;
+  readonly probeTimeoutMs: number;
+  readonly probeMaxBufferBytes: number;
+  readonly handleEntropyBytes: number;
+  readonly asyncMode: AsyncMode;
+  readonly deferAfterMs: number;
+  readonly maxJobWaitMs: number;
+  readonly jobRetentionMs: number;
+  readonly maxTrackedJobs: number;
+  readonly progressIntervalMs: number;
+  readonly includeRawByDefault: boolean;
+  readonly maxBatchGoals: number;
 }
 
 const SERVER_OPTION_KEYS = new Set([
@@ -80,6 +126,18 @@ const SERVER_OPTION_KEYS = new Set([
   "stderrReturnLimitBytes",
   "maxCommandOutputBytes",
   "allowAgdaExec",
+  "abortGraceMs",
+  "probeTimeoutMs",
+  "probeMaxBufferBytes",
+  "handleEntropyBytes",
+  "asyncMode",
+  "deferAfterMs",
+  "maxJobWaitMs",
+  "jobRetentionMs",
+  "maxTrackedJobs",
+  "progressIntervalMs",
+  "includeRawByDefault",
+  "maxBatchGoals",
 ]);
 
 const WORKSPACE_OPTION_KEYS = new Set([
@@ -144,6 +202,21 @@ function positiveInteger(
     invalid(`${path}.${key} must be a positive safe integer`, { path: `${path}.${key}` });
   }
   return value;
+}
+
+function enumValue<const T extends readonly string[]>(
+  record: Record<string, unknown>,
+  key: string,
+  allowed: T,
+  fallback: T[number],
+  path: string,
+): T[number] {
+  const value = record[key];
+  if (value === undefined) return fallback;
+  if (typeof value !== "string" || !allowed.includes(value)) {
+    invalid(`${path}.${key} must be one of ${allowed.join(", ")}`, { path: `${path}.${key}` });
+  }
+  return value as T[number];
 }
 
 function booleanValue(record: Record<string, unknown>, key: string, fallback: boolean, path: string): boolean {
@@ -243,6 +316,24 @@ export function parseServerOptions(input: unknown = {}): ResolvedServerOptions {
     "options",
   );
 
+  const handleEntropyBytes = positiveInteger(
+    input,
+    "handleEntropyBytes",
+    DEFAULT_HANDLE_ENTROPY_BYTES,
+    "options",
+  );
+  if (handleEntropyBytes < 16) {
+    invalid("handleEntropyBytes must be at least 16 to keep handles unguessable", {
+      path: "options.handleEntropyBytes",
+    });
+  }
+
+  const deferAfterMs = positiveInteger(input, "deferAfterMs", DEFAULT_DEFER_AFTER_MS, "options");
+  const maxJobWaitMs = positiveInteger(input, "maxJobWaitMs", DEFAULT_MAX_JOB_WAIT_MS, "options");
+  if (deferAfterMs > maxJobWaitMs) {
+    invalid("deferAfterMs cannot exceed maxJobWaitMs", { path: "options.deferAfterMs" });
+  }
+
   const result: ResolvedServerOptions = {
     agdaExecutable,
     workspaceRoots: stringArray(input, "workspaceRoots", "options"),
@@ -279,6 +370,28 @@ export function parseServerOptions(input: unknown = {}): ResolvedServerOptions {
     stderrReturnLimitBytes,
     maxCommandOutputBytes,
     allowAgdaExec,
+    abortGraceMs: positiveInteger(input, "abortGraceMs", DEFAULT_ABORT_GRACE_MS, "options"),
+    probeTimeoutMs: positiveInteger(
+      input,
+      "probeTimeoutMs",
+      legacyTimeoutConfigured ? commandTimeoutMs : DEFAULT_PROBE_TIMEOUT_MS,
+      "options",
+    ),
+    probeMaxBufferBytes: positiveInteger(
+      input,
+      "probeMaxBufferBytes",
+      DEFAULT_PROBE_MAX_BUFFER_BYTES,
+      "options",
+    ),
+    handleEntropyBytes,
+    asyncMode: enumValue(input, "asyncMode", ASYNC_MODES, DEFAULT_ASYNC_MODE, "options"),
+    deferAfterMs,
+    maxJobWaitMs,
+    jobRetentionMs: positiveInteger(input, "jobRetentionMs", DEFAULT_JOB_RETENTION_MS, "options"),
+    maxTrackedJobs: positiveInteger(input, "maxTrackedJobs", DEFAULT_MAX_TRACKED_JOBS, "options"),
+    progressIntervalMs: positiveInteger(input, "progressIntervalMs", DEFAULT_PROGRESS_INTERVAL_MS, "options"),
+    includeRawByDefault: booleanValue(input, "includeRawByDefault", DEFAULT_INCLUDE_RAW, "options"),
+    maxBatchGoals: positiveInteger(input, "maxBatchGoals", DEFAULT_MAX_BATCH_GOALS, "options"),
     ...(libraryFile === undefined ? {} : { libraryFile }),
   };
   return Object.freeze(result);
