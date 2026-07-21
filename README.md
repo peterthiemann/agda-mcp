@@ -9,6 +9,82 @@ The server exposes normalized, transport-independent results while retaining
 Agda's native response events in a bounded `raw` field. Case split, refine, and
 auto return fingerprinted edit proposals; they never write source files.
 
+## End-to-end example
+
+Suppose `/workspace/Example.agda` contains:
+
+```agda
+module Example where
+
+data Bool : Set where
+  true  : Bool
+  false : Bool
+
+not : Bool → Bool
+not x = ?
+```
+
+An agent can take the file from one hole to two case-specific holes as follows.
+Responses below are abbreviated to their normalized `data`; opaque handles and
+the source fingerprint must be reused exactly as returned.
+
+```text
+# 1. Load and typecheck the top-level module.
+agda_load_module({
+  "modulePath": "/workspace/Example.agda",
+  "includeRaw": false
+})
+→ data.workspace = "workspace_…"
+
+# 2. Retrieve the current goals (the load response includes them too).
+agda_retrieve_goals({
+  "workspace": "workspace_…",
+  "includeRaw": false
+})
+→ data.goals[0] = { "handle": "goal_…", "type": "Bool", … }
+
+# 3. Inspect the selected goal's local context.
+agda_retrieve_context({
+  "goal": "goal_…",
+  "includeRaw": false
+})
+→ data = {
+    "goal": "goal_…",
+    "goalType": "Bool",
+    "context": [{ "reifiedName": "x", "type": "Bool", "inScope": true }]
+  }
+
+# 4. Ask Agda for a non-mutating case-split preview.
+agda_case_split({
+  "goal": "goal_…",
+  "variables": "x",
+  "includeRaw": false
+})
+→ data.edits[0] = {
+    "file": "/workspace/Example.agda",
+    "range": <exact UTF-16 range covering `not x = ?`>,
+    "replacement": "not true = ?\nnot false = ?",
+    "expectedSourceFingerprint": "…"
+  }
+
+# 5. Client filesystem action — not an agda-mcp tool:
+#    verify the file's SHA-256 fingerprint, then replace precisely the returned
+#    range with the returned replacement text.
+
+# 6. Reload the edited file and obtain fresh goal handles.
+agda_typecheck({
+  "workspace": "workspace_…",
+  "includeRaw": false
+})
+→ data.checked = true
+→ data.goals = [{ "handle": "goal_…", … }, { "handle": "goal_…", … }]
+```
+
+For a refinement, use `agda_refine` in step 4 with an `expression`; it returns
+the same fingerprinted `edits` shape and follows the same apply-then-typecheck
+flow. Preview operations reload canonical Agda state before returning, so only
+goal handles from the latest response should be used.
+
 ## Requirements
 
 - Node.js 22 or newer
