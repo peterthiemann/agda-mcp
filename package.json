@@ -1,7 +1,7 @@
 {
   "name": "agda-mcp",
   "version": "0.2.0",
-  "description": "A non-mutating MCP server for Agda's interaction protocol",
+  "description": "An MCP server for Agda's interaction protocol",
   "type": "module",
   "engines": {
     "node": ">=22"

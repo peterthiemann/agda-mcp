@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
-import { open, realpath } from "node:fs/promises";
+import { open, realpath, rename, unlink } from "node:fs/promises";
+import path from "node:path";
 
 import type {
   AgdaVersionInfo,
@@ -10,6 +11,7 @@ import type {
   RawAgdaResponse,
   RawCommandTranscript,
   SourceFormat,
+  TextEdit,
   WorkspaceHandle,
   WorkspaceSessionSummary,
 } from "../application/domain.js";
@@ -17,6 +19,7 @@ import { ApplicationError } from "../application/errors.js";
 import type { AgdaInstallation } from "../discovery/agdaInstallation.js";
 import type { ModuleDiscoveryPlan } from "../discovery/projectResolver.js";
 import { normalizeLoadResponse } from "../normalization/responses.js";
+import { applyTextEdits, type EditPlan } from "../normalization/editPlanner.js";
 import type {
   AgdaCommand,
   AgdaCommandContext,
@@ -38,6 +41,7 @@ interface SourceSnapshot {
   readonly bytes: Buffer;
   readonly text: string;
   readonly fingerprint: string;
+  readonly mode: number;
 }
 
 interface ActiveModuleState {
@@ -73,6 +77,7 @@ export interface PreviewTransactionResult<T> {
   readonly proposal: T;
   readonly restored: NormalizedResult<ModuleCheckResult>;
   readonly raw: RawAgdaResponse;
+  readonly applied: boolean;
 }
 
 export interface WorkspaceSessionOptions {
@@ -113,10 +118,85 @@ async function readSnapshot(file: string): Promise<SourceSnapshot> {
       bytes,
       text: bytes.toString("utf8"),
       fingerprint: createHash("sha256").update(bytes).digest("hex"),
+      mode: metadata.mode,
     });
   } finally {
     await handle?.close();
   }
+}
+
+async function replaceSourceAtomically(
+  file: string,
+  expectedFingerprint: string,
+  text: string,
+  mode: number,
+): Promise<SourceSnapshot> {
+  const bytes = Buffer.from(text, "utf8");
+  const fingerprint = createHash("sha256").update(bytes).digest("hex");
+  const temporary = path.join(
+    path.dirname(file),
+    `.${path.basename(file)}.agda-mcp-${randomBytes(12).toString("hex")}.tmp`,
+  );
+  let handle;
+  try {
+    handle = await open(
+      temporary,
+      fsConstants.O_WRONLY |
+        fsConstants.O_CREAT |
+        fsConstants.O_EXCL |
+        fsConstants.O_NOFOLLOW,
+      mode & 0o777,
+    );
+    await handle.writeFile(bytes);
+    await handle.sync();
+    await handle.close();
+    handle = undefined;
+
+    // Recheck immediately before the atomic replacement. This prevents a
+    // normal external edit from being silently overwritten while Agda was
+    // producing or the server was materializing the proposal.
+    const current = await readSnapshot(file);
+    if (current.fingerprint !== expectedFingerprint) {
+      throw new ApplicationError("SOURCE_CHANGED", "The active Agda source changed before direct edit", {
+        details: {
+          modulePath: file,
+          expectedSourceFingerprint: expectedFingerprint,
+          actualSourceFingerprint: current.fingerprint,
+        },
+      });
+    }
+    await rename(temporary, file);
+    return Object.freeze({ bytes, text, fingerprint, mode });
+  } finally {
+    await handle?.close().catch(() => undefined);
+    await unlink(temporary).catch(() => undefined);
+  }
+}
+
+function materializeProposal(
+  active: ActiveModuleState,
+  edits: readonly TextEdit[],
+): string {
+  for (const edit of edits) {
+    if (
+      edit.file !== active.plan.modulePath ||
+      edit.expectedSourceFingerprint !== active.snapshot.fingerprint
+    ) {
+      throw new ApplicationError(
+        "UNSUPPORTED_EDIT_SHAPE",
+        "Direct edit proposal does not target the active source snapshot",
+        {
+          details: {
+            modulePath: active.plan.modulePath,
+            editFile: edit.file,
+            expectedSourceFingerprint: active.snapshot.fingerprint,
+            editSourceFingerprint: edit.expectedSourceFingerprint,
+          },
+        },
+      );
+    }
+  }
+  return applyTextEdits(active.snapshot.text, edits);
 }
 
 function codePointPosition(text: string, utf16Offset: number): number {
@@ -301,11 +381,12 @@ export class WorkspaceSession {
     }, options.signal);
   }
 
-  previewGoal<T>(
+  previewGoal<T extends EditPlan>(
     handle: string,
     command: (goal: GoalRecord) => AgdaCommand,
     planner: (events: readonly unknown[], context: PreviewPlanningContext) => T,
     options: SendCommandOptions = {},
+    apply = false,
   ): Promise<PreviewTransactionResult<T>> {
     return this.#queue.enqueue(async () => {
       const active = this.#active;
@@ -318,6 +399,7 @@ export class WorkspaceSession {
       let proposal: T | undefined;
       let operationError: unknown;
       let operationAttempted = false;
+      let appliedSnapshot: SourceSnapshot | undefined;
 
       try {
         operationAttempted = true;
@@ -340,6 +422,15 @@ export class WorkspaceSession {
             goalRange: goal.range,
           }),
         );
+        if (apply && proposal.edits.length > 0) {
+          const editedSource = materializeProposal(active, proposal.edits);
+          appliedSnapshot = await replaceSourceAtomically(
+            active.plan.modulePath,
+            active.snapshot.fingerprint,
+            editedSource,
+            active.snapshot.mode,
+          );
+        }
       } catch (error: unknown) {
         operationError = error;
       }
@@ -349,20 +440,46 @@ export class WorkspaceSession {
         if (!operationAttempted) throw operationError;
         restored = await this.#loadNow(active.plan);
       } catch (restoreError: unknown) {
-        this.#active = undefined;
-        this.#recoverable = undefined;
-        this.#goals.revokeAll();
-        this.#lifecycle = "stopped";
-        await this.#host.terminate().catch(() => undefined);
+        let rolledBack = false;
+        let rollbackError: unknown;
+        if (appliedSnapshot !== undefined) {
+          try {
+            await replaceSourceAtomically(
+              active.plan.modulePath,
+              appliedSnapshot.fingerprint,
+              active.snapshot.text,
+              active.snapshot.mode,
+            );
+            this.#ensureHost();
+            await this.#loadNow(active.plan);
+            rolledBack = true;
+          } catch (error: unknown) {
+            rollbackError = error;
+          }
+        }
+        if (!rolledBack) {
+          this.#active = undefined;
+          this.#recoverable = undefined;
+          this.#goals.revokeAll();
+          this.#lifecycle = "stopped";
+          await this.#host.terminate().catch(() => undefined);
+        }
         throw new ApplicationError(
           "RESTORE_FAILED",
-          "Agda state could not be restored after the transformation preview",
+          appliedSnapshot === undefined
+            ? "Agda state could not be restored after the transformation preview"
+            : rolledBack
+              ? "The direct edit was rolled back because its typecheck could not complete"
+              : "The direct edit could not be typechecked or safely rolled back",
           {
             cause: restoreError,
             details: {
               modulePath: active.plan.modulePath,
+              applied: appliedSnapshot !== undefined,
+              rolledBack,
               operationError: errorDescription(operationError),
               restoreError: errorDescription(restoreError),
+              rollbackError: errorDescription(rollbackError),
             },
           },
         );
@@ -378,7 +495,12 @@ export class WorkspaceSession {
       return Object.freeze({
         proposal,
         restored,
-        raw: withRestoreTranscript(protocol.raw, restored.raw),
+        raw: withCanonicalTranscript(
+          protocol.raw,
+          restored.raw,
+          appliedSnapshot !== undefined,
+        ),
+        applied: appliedSnapshot !== undefined,
       });
     }, options.signal);
   }
@@ -525,7 +647,7 @@ function sendOptions(options: SendCommandOptions, timeoutMs: number): SendComman
 }
 
 function sourceChangedError(active: ActiveModuleState, actualFingerprint: string): ApplicationError {
-  return new ApplicationError("SOURCE_CHANGED", "The active Agda source changed during the preview", {
+  return new ApplicationError("SOURCE_CHANGED", "The active Agda source changed during the transformation", {
     details: {
       modulePath: active.plan.modulePath,
       expectedSourceFingerprint: active.snapshot.fingerprint,
@@ -546,11 +668,17 @@ function rawCommandTranscript(raw: RawAgdaResponse): RawCommandTranscript {
   });
 }
 
-function withRestoreTranscript(
+function withCanonicalTranscript(
   operation: RawAgdaResponse,
-  restore: RawAgdaResponse,
+  canonical: RawAgdaResponse,
+  applied: boolean,
 ): RawAgdaResponse {
-  return Object.freeze({ ...operation, restore: rawCommandTranscript(restore) });
+  const transcript = rawCommandTranscript(canonical);
+  return Object.freeze(
+    applied
+      ? { ...operation, typecheck: transcript }
+      : { ...operation, restore: transcript },
+  );
 }
 
 function errorDescription(error: unknown): string | undefined {

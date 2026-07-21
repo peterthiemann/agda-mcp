@@ -3,6 +3,26 @@
 This file records notable changes to `agda-mcp`, with the most recent release
 first.
 
+## [Unreleased]
+
+### Added
+
+- Added `includeContexts` to `agda_load_module` and `agda_typecheck` so the
+  newly returned goals and their local contexts can be collected in one MCP
+  operation.
+- Added opt-in `apply: true` transactions for case split, refine, and auto.
+  Proposed edits are fingerprint-checked, atomically written, and immediately
+  typechecked; non-mutating preview remains the default.
+
+### Changed
+
+- Made the fast-response policy the default: slow calls defer after one second,
+  native Agda events are omitted unless requested, MCP text content is compact,
+  and the full normalized result is sent once in `structuredContent`.
+- Extended unit, live-Agda, property-based, and fuzz coverage for compound
+  inspection, response shaping, multi-edit application, source races, and
+  guarded direct transformations across all supported source formats.
+
 ## [0.2.0] - 2026-07-19
 
 ### Added

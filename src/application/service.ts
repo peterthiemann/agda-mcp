@@ -23,6 +23,7 @@ import type {
   RetrieveContextRequest,
   RetrieveContextsRequest,
   ServerInfo,
+  TypecheckRequest,
   WorkspaceRequest,
   RewriteMode,
   NormalizationMode,
@@ -267,7 +268,7 @@ export class AgdaApplicationService implements AgdaService {
         workspaces: this.#sessions.summaries,
         capabilities: Object.freeze({
           sourceFormats: Object.freeze(["agda", "lagda", "lagda.md"] as const),
-          mutatesFiles: false,
+          mutatesFiles: "opt-in",
           metavariableScope: "interaction-backend",
         }),
       }),
@@ -276,18 +277,54 @@ export class AgdaApplicationService implements AgdaService {
     });
   }
 
-  loadModule(
+  async loadModule(
     request: LoadModuleRequest,
     context?: OperationContext,
   ): Promise<NormalizedResult<ModuleCheckResult>> {
-    return this.#sessions.loadModule(request.modulePath, signalOptions(context));
+    const loaded = await this.#sessions.loadModule(request.modulePath, signalOptions(context));
+    return request.includeContexts === true ? this.#withContexts(loaded, context) : loaded;
   }
 
-  typecheck(
-    request: WorkspaceRequest,
+  async typecheck(
+    request: TypecheckRequest,
     context?: OperationContext,
   ): Promise<NormalizedResult<ModuleCheckResult>> {
-    return this.#sessions.typecheck(request.workspace, signalOptions(context));
+    const checked = await this.#sessions.typecheck(request.workspace, signalOptions(context));
+    return request.includeContexts === true ? this.#withContexts(checked, context) : checked;
+  }
+
+  async #withContexts(
+    checked: NormalizedResult<ModuleCheckResult>,
+    context?: OperationContext,
+  ): Promise<NormalizedResult<ModuleCheckResult>> {
+    const goalHandles = checked.data.goals.map((goal) => goal.handle);
+    if (goalHandles.length === 0) {
+      return Object.freeze({
+        ...checked,
+        data: Object.freeze({
+          ...checked.data,
+          contexts: Object.freeze({
+            requested: 0,
+            succeeded: 0,
+            failed: 0,
+            contexts: Object.freeze([]),
+          }),
+        }),
+      });
+    }
+    const contexts = await this.retrieveContexts({ goals: goalHandles }, context);
+    return Object.freeze({
+      data: Object.freeze({ ...checked.data, contexts: contexts.data }),
+      warnings: Object.freeze([...new Set([...checked.warnings, ...contexts.warnings])]),
+      raw: mergeTranscripts(
+        this.#installation.adapter,
+        [rawTranscript(checked.raw), rawTranscript(contexts.raw)],
+        {
+          rawResponseLimitBytes: this.#options.rawResponseLimitBytes,
+          stderrReturnLimitBytes: this.#options.stderrReturnLimitBytes,
+        },
+      ),
+    });
   }
 
   async retrieveGoals(
@@ -436,6 +473,7 @@ export class AgdaApplicationService implements AgdaService {
   ): Promise<NormalizedResult<EditPreviewResult>> {
     validateGoalHandle(request.goal);
     validateOptionalString(request.variables, "variables");
+    validateOptionalBoolean(request.apply, "apply");
     const session = this.#sessions.requireGoal(request.goal);
     const transaction = await session.previewGoal(
       request.goal,
@@ -447,11 +485,13 @@ export class AgdaApplicationService implements AgdaService {
       }),
       planCaseSplitEdit,
       signalOptions(context),
+      request.apply === true,
     );
     return transformationResult(
       transaction.proposal.edits,
       transaction.restored,
       transaction.raw,
+      transaction.applied,
     );
   }
 
@@ -461,6 +501,7 @@ export class AgdaApplicationService implements AgdaService {
   ): Promise<NormalizedResult<EditPreviewResult>> {
     validateGoalHandle(request.goal);
     validateOptionalString(request.expression, "expression");
+    validateOptionalBoolean(request.apply, "apply");
     if (request.usePatternLambda !== undefined && typeof request.usePatternLambda !== "boolean") {
       throw new ApplicationError("INVALID_ARGUMENT", "usePatternLambda must be a boolean");
     }
@@ -479,11 +520,13 @@ export class AgdaApplicationService implements AgdaService {
       (events, planningContext) =>
         planRefineEdit(events, planningContext, request.expression),
       signalOptions(context),
+      request.apply === true,
     );
     return transformationResult(
       transaction.proposal.edits,
       transaction.restored,
       transaction.raw,
+      transaction.applied,
     );
   }
 
@@ -493,6 +536,7 @@ export class AgdaApplicationService implements AgdaService {
   ): Promise<NormalizedResult<AutoResult>> {
     validateGoalHandle(request.goal);
     validateOptionalString(request.query, "query");
+    validateOptionalBoolean(request.apply, "apply");
     const session = this.#sessions.requireGoal(request.goal);
     const transaction = await session.previewGoal(
       request.goal,
@@ -504,8 +548,13 @@ export class AgdaApplicationService implements AgdaService {
       }),
       planAutoEdit,
       signalOptions(context),
+      request.apply === true,
     );
-    const base = editPreviewData(transaction.proposal.edits, transaction.restored);
+    const base = editPreviewData(
+      transaction.proposal.edits,
+      transaction.restored,
+      transaction.applied,
+    );
     return Object.freeze({
       data: Object.freeze({
         ...base,
@@ -652,14 +701,25 @@ function validateOptionalString(value: unknown, name: string): void {
   }
 }
 
+function validateOptionalBoolean(value: unknown, name: string): void {
+  if (value !== undefined && typeof value !== "boolean") {
+    throw new ApplicationError("INVALID_ARGUMENT", `${name} must be a boolean`);
+  }
+}
+
 function editPreviewData(
   edits: EditPreviewResult["edits"],
   restored: NormalizedResult<ModuleCheckResult>,
+  applied: boolean,
 ): EditPreviewResult {
   return Object.freeze({
     workspace: restored.data.workspace,
     modulePath: restored.data.modulePath,
     edits,
+    applied,
+    checked: restored.data.checked,
+    diagnostics: restored.data.diagnostics,
+    sourceFingerprint: restored.data.sourceFingerprint,
     restoredRevision: restored.data.revision,
     goals: restored.data.goals,
   });
@@ -669,9 +729,10 @@ function transformationResult(
   edits: EditPreviewResult["edits"],
   restored: NormalizedResult<ModuleCheckResult>,
   raw: RawAgdaResponse,
+  applied: boolean,
 ): NormalizedResult<EditPreviewResult> {
   return Object.freeze({
-    data: editPreviewData(edits, restored),
+    data: editPreviewData(edits, restored, applied),
     warnings: restored.warnings,
     raw,
   });

@@ -33,7 +33,28 @@ export const moduleCheckOptionFields = {
     .boolean()
     .optional()
     .describe("Return only errors and warnings, dropping goals and metavariables"),
+  includeContexts: z
+    .boolean()
+    .optional()
+    .describe("Retrieve every returned goal context in the same MCP operation"),
 };
+
+function rejectContradictoryModuleOptions(
+  value: {
+    readonly diagnosticsOnly?: boolean | undefined;
+    readonly includeContexts?: boolean | undefined;
+  },
+  context: z.core.$RefinementCtx,
+): void {
+  if (value.diagnosticsOnly === true && value.includeContexts === true) {
+    context.addIssue({
+      code: "custom",
+      message: "diagnosticsOnly and includeContexts cannot both be true",
+      path: [],
+      input: value,
+    });
+  }
+}
 
 export const serverInfoInputSchema = z.object({ ...callOptionFields }).strict();
 
@@ -78,15 +99,24 @@ export const loadModuleInputSchema = z
     ...moduleCheckOptionFields,
     modulePath: z.string().min(1).describe("Absolute path to an .agda, .lagda, or .lagda.md file"),
   })
-  .strict();
+  .strict()
+  .superRefine(rejectContradictoryModuleOptions);
 
 export const workspaceInputSchema = z
+  .object({
+    ...callOptionFields,
+    workspace: z.string().min(1).describe("Opaque workspace handle returned by agda_load_module"),
+  })
+  .strict();
+
+export const typecheckInputSchema = z
   .object({
     ...callOptionFields,
     ...moduleCheckOptionFields,
     workspace: z.string().min(1).describe("Opaque workspace handle returned by agda_load_module"),
   })
-  .strict();
+  .strict()
+  .superRefine(rejectContradictoryModuleOptions);
 
 export const rewriteModeSchema = z.enum([
   "as_is",
@@ -134,6 +164,10 @@ export const caseSplitInputSchema = z
     ...callOptionFields,
     goal: z.string().min(1).describe("Opaque goal handle returned by the latest module state"),
     variables: z.string().optional().describe("Pattern variables to split; empty splits the result"),
+    apply: z
+      .boolean()
+      .optional()
+      .describe("Guardedly write the proposal and typecheck it in one transaction"),
   })
   .strict();
 
@@ -143,6 +177,10 @@ export const refineInputSchema = z
     goal: z.string().min(1).describe("Opaque goal handle returned by the latest module state"),
     expression: z.string().optional().describe("Expression to give; empty or omitted requests intro/refine"),
     usePatternLambda: z.boolean().optional(),
+    apply: z
+      .boolean()
+      .optional()
+      .describe("Guardedly write the proposal and typecheck it in one transaction"),
   })
   .strict();
 
@@ -151,6 +189,10 @@ export const autoInputSchema = z
     ...callOptionFields,
     goal: z.string().min(1).describe("Opaque goal handle returned by the latest module state"),
     query: z.string().optional().describe("Agda auto search options"),
+    apply: z
+      .boolean()
+      .optional()
+      .describe("Guardedly write the proposal and typecheck it in one transaction"),
   })
   .strict();
 

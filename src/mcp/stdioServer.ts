@@ -29,27 +29,70 @@ import {
   normalizeExpressionInputSchema,
   refineInputSchema,
   serverInfoInputSchema,
+  typecheckInputSchema,
   workspaceInputSchema,
 } from "./toolSchemas.js";
 
 export type AgdaServiceProvider = () => Promise<AgdaService>;
 export type JobRegistryProvider = () => Promise<JobRegistry<NormalizedResult<unknown>>>;
 
-function jsonObject(value: unknown): Record<string, unknown> {
-  return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
+function structuredObject(value: unknown): Record<string, unknown> {
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return { value };
+}
+
+function compactText(value: unknown): string {
+  const object = structuredObject(value);
+  const data =
+    typeof object.data === "object" && object.data !== null && !Array.isArray(object.data)
+      ? (object.data as Record<string, unknown>)
+      : undefined;
+  const raw =
+    typeof object.raw === "object" && object.raw !== null && !Array.isArray(object.raw)
+      ? (object.raw as Record<string, unknown>)
+      : undefined;
+  const count = (key: string): number | undefined => {
+    const candidate = data?.[key];
+    return Array.isArray(candidate) ? candidate.length : undefined;
+  };
+  const status = typeof object.status === "string" ? object.status : "completed";
+  return JSON.stringify({
+    status,
+    summary: "Full result is available in structuredContent.",
+    ...(typeof data?.checked === "boolean" ? { checked: data.checked } : {}),
+    ...(typeof data?.applied === "boolean" ? { applied: data.applied } : {}),
+    ...(typeof data?.found === "boolean" ? { found: data.found } : {}),
+    ...(count("diagnostics") === undefined ? {} : { diagnostics: count("diagnostics") }),
+    ...(count("goals") === undefined ? {} : { goals: count("goals") }),
+    ...(count("edits") === undefined ? {} : { edits: count("edits") }),
+    ...(typeof data?.requested === "number" ? { requested: data.requested } : {}),
+    ...(typeof data?.succeeded === "number" ? { succeeded: data.succeeded } : {}),
+    ...(Array.isArray(object.warnings) ? { warnings: object.warnings.length } : {}),
+    ...(raw === undefined
+      ? {}
+      : {
+          raw: {
+            eventsIncluded: Array.isArray(raw.events),
+            ...(typeof raw.eventCount === "number" ? { eventCount: raw.eventCount } : {}),
+            ...(typeof raw.totalBytes === "number" ? { totalBytes: raw.totalBytes } : {}),
+          },
+        }),
+  });
 }
 
 function structuredToolResult(value: unknown) {
   return {
-    content: [{ type: "text" as const, text: JSON.stringify(value) }],
-    structuredContent: jsonObject(value),
+    content: [{ type: "text" as const, text: compactText(value) }],
+    structuredContent: structuredObject(value),
   };
 }
 
 function successfulToolResult(value: NormalizedResult<unknown>) {
   return {
-    content: [{ type: "text" as const, text: JSON.stringify(value) }],
-    structuredContent: jsonObject(value),
+    content: [{ type: "text" as const, text: compactText(value) }],
+    structuredContent: structuredObject(value),
   };
 }
 
@@ -92,7 +135,7 @@ function failedToolResult(error: unknown, extra: Record<string, unknown> = {}) {
   return {
     isError: true,
     content: [{ type: "text" as const, text: JSON.stringify(body) }],
-    structuredContent: jsonObject(body),
+    structuredContent: structuredObject(body),
   };
 }
 
@@ -106,7 +149,7 @@ function pendingToolResult(job: JobSummary) {
   };
   return {
     content: [{ type: "text" as const, text: JSON.stringify(body) }],
-    structuredContent: jsonObject(body),
+    structuredContent: structuredObject(body),
   };
 }
 
@@ -127,12 +170,14 @@ export interface CallOptions {
   readonly async?: boolean | undefined;
   readonly includeRaw?: boolean | undefined;
   readonly diagnosticsOnly?: boolean | undefined;
+  readonly includeContexts?: boolean | undefined;
 }
 
 interface RawLike {
   readonly events?: readonly unknown[];
   readonly stderr?: { readonly chunks?: readonly string[] };
   readonly restore?: RawLike;
+  readonly typecheck?: RawLike;
   readonly [key: string]: unknown;
 }
 
@@ -143,12 +188,13 @@ interface RawLike {
  * byte counts, completeness, stderr — is preserved.
  */
 function summarizeRaw(raw: RawLike): Record<string, unknown> {
-  const { events, restore, ...rest } = raw;
+  const { events, restore, typecheck, ...rest } = raw;
   return {
     ...rest,
     eventsOmitted: true,
     eventCount: events?.length ?? 0,
     ...(restore === undefined ? {} : { restore: summarizeRaw(restore) }),
+    ...(typecheck === undefined ? {} : { typecheck: summarizeRaw(typecheck) }),
   };
 }
 
@@ -163,7 +209,12 @@ function shapeResult(
 ): NormalizedResult<unknown> {
   let data = result.data;
   if (options.diagnosticsOnly && data !== null && typeof data === "object" && "diagnostics" in data) {
-    const { goals: _goals, invisibleMetavariables: _metas, ...kept } = data as Record<string, unknown>;
+    const {
+      goals: _goals,
+      invisibleMetavariables: _metas,
+      contexts: _contexts,
+      ...kept
+    } = data as Record<string, unknown>;
     data = kept;
   }
   const raw = options.includeRaw
@@ -336,13 +387,17 @@ export function createAgdaMcpServer(
       description: "Load and typecheck one top-level Agda module from disk",
       inputSchema: loadModuleInputSchema,
     },
-    async ({ modulePath, ...call }, extra) =>
+    async ({ modulePath, includeContexts, ...call }, extra) =>
       invoke(
         jobs,
         "agda_load_module",
         call,
         extra,
-        async (context) => (await serviceProvider()).loadModule({ modulePath }, context),
+        async (context) =>
+          (await serviceProvider()).loadModule(
+            { modulePath, ...(includeContexts === undefined ? {} : { includeContexts }) },
+            context,
+          ),
         progressIntervalMs,
         includeRawByDefault,
       ),
@@ -352,15 +407,19 @@ export function createAgdaMcpServer(
     "agda_typecheck",
     {
       description: "Reload and typecheck the active module in a workspace",
-      inputSchema: workspaceInputSchema,
+      inputSchema: typecheckInputSchema,
     },
-    async ({ workspace, ...call }, extra) =>
+    async ({ workspace, includeContexts, ...call }, extra) =>
       invoke(
         jobs,
         "agda_typecheck",
         call,
         extra,
-        async (context) => (await serviceProvider()).typecheck({ workspace }, context),
+        async (context) =>
+          (await serviceProvider()).typecheck(
+            { workspace, ...(includeContexts === undefined ? {} : { includeContexts }) },
+            context,
+          ),
         progressIntervalMs,
         includeRawByDefault,
       ),
@@ -450,10 +509,10 @@ export function createAgdaMcpServer(
   server.registerTool(
     "agda_case_split",
     {
-      description: "Preview a non-mutating case split, then reload canonical Agda state",
+      description: "Preview a case split, or atomically apply and typecheck it with apply:true",
       inputSchema: caseSplitInputSchema,
     },
-    async ({ goal, variables, ...call }, extra) =>
+    async ({ goal, variables, apply, ...call }, extra) =>
       invoke(
         jobs,
         "agda_case_split",
@@ -461,7 +520,11 @@ export function createAgdaMcpServer(
         extra,
         async (context) =>
           (await serviceProvider()).caseSplit(
-            { goal, ...(variables === undefined ? {} : { variables }) },
+            {
+              goal,
+              ...(variables === undefined ? {} : { variables }),
+              ...(apply === undefined ? {} : { apply }),
+            },
             context,
           ),
         progressIntervalMs,
@@ -472,10 +535,10 @@ export function createAgdaMcpServer(
   server.registerTool(
     "agda_refine",
     {
-      description: "Preview a non-mutating refinement, then reload canonical Agda state",
+      description: "Preview a refinement, or atomically apply and typecheck it with apply:true",
       inputSchema: refineInputSchema,
     },
-    async ({ goal, expression, usePatternLambda, ...call }, extra) =>
+    async ({ goal, expression, usePatternLambda, apply, ...call }, extra) =>
       invoke(
         jobs,
         "agda_refine",
@@ -487,6 +550,7 @@ export function createAgdaMcpServer(
               goal,
               ...(expression === undefined ? {} : { expression }),
               ...(usePatternLambda === undefined ? {} : { usePatternLambda }),
+              ...(apply === undefined ? {} : { apply }),
             },
             context,
           ),
@@ -498,10 +562,10 @@ export function createAgdaMcpServer(
   server.registerTool(
     "agda_auto",
     {
-      description: "Preview non-mutating Agda proof search, then reload canonical state",
+      description: "Preview Agda proof search, or atomically apply and typecheck it with apply:true",
       inputSchema: autoInputSchema,
     },
-    async ({ goal, query, ...call }, extra) =>
+    async ({ goal, query, apply, ...call }, extra) =>
       invoke(
         jobs,
         "agda_auto",
@@ -509,7 +573,11 @@ export function createAgdaMcpServer(
         extra,
         async (context) =>
           (await serviceProvider()).auto(
-            { goal, ...(query === undefined ? {} : { query }) },
+            {
+              goal,
+              ...(query === undefined ? {} : { query }),
+              ...(apply === undefined ? {} : { apply }),
+            },
             context,
           ),
         progressIntervalMs,

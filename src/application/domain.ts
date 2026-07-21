@@ -81,6 +81,7 @@ export interface RawCommandTranscript {
 export interface RawAgdaResponse extends RawCommandTranscript {
   readonly adapter: string;
   readonly restore?: RawCommandTranscript;
+  readonly typecheck?: RawCommandTranscript;
 }
 
 export interface NormalizedResult<T> {
@@ -114,7 +115,7 @@ export interface ServerInfo {
   readonly workspaces: readonly WorkspaceSessionSummary[];
   readonly capabilities: {
     readonly sourceFormats: readonly SourceFormat[];
-    readonly mutatesFiles: false;
+    readonly mutatesFiles: "opt-in";
     readonly metavariableScope: "interaction-backend";
   };
 }
@@ -131,6 +132,8 @@ export interface ModuleCheckResult {
   readonly diagnostics: readonly Diagnostic[];
   readonly goals: readonly GoalSummary[];
   readonly invisibleMetavariables: readonly MetavariableSummary[];
+  /** Present when the caller requested compound goal inspection. */
+  readonly contexts?: ContextsResult;
   readonly agda: AgdaVersionInfo;
 }
 
@@ -174,6 +177,12 @@ export interface EditPreviewResult {
   readonly workspace: WorkspaceHandle;
   readonly modulePath: string;
   readonly edits: readonly TextEdit[];
+  /** True only when guarded direct-edit mode changed the source file. */
+  readonly applied: boolean;
+  /** Verdict from the canonical reload after preview or direct application. */
+  readonly checked: boolean;
+  readonly diagnostics: readonly Diagnostic[];
+  readonly sourceFingerprint: string;
   readonly restoredRevision: number;
   readonly goals: readonly GoalSummary[];
 }
@@ -213,10 +222,15 @@ export type NormalizationMode =
 
 export interface LoadModuleRequest {
   readonly modulePath: string;
+  readonly includeContexts?: boolean;
 }
 
 export interface WorkspaceRequest {
   readonly workspace: WorkspaceHandle;
+}
+
+export interface TypecheckRequest extends WorkspaceRequest {
+  readonly includeContexts?: boolean;
 }
 
 export interface GoalRequest {
@@ -234,15 +248,18 @@ export interface RetrieveContextsRequest {
 
 export interface CaseSplitRequest extends GoalRequest {
   readonly variables?: string;
+  readonly apply?: boolean;
 }
 
 export interface RefineRequest extends GoalRequest {
   readonly expression?: string;
   readonly usePatternLambda?: boolean;
+  readonly apply?: boolean;
 }
 
 export interface AutoRequest extends GoalRequest {
   readonly query?: string;
+  readonly apply?: boolean;
 }
 
 export interface ScopedExpressionRequest {

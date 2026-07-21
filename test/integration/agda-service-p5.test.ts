@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -121,6 +122,54 @@ test("live case split previews preserve all formats and produce typecheckable cl
       // The restore reload starts a new generation, so handles rotate.
       assert.notEqual(preview.data.goals[0]?.handle, goal as string);
       await applyAndTypecheck(service, loaded.data.workspace, modulePath, preview.data.edits[0]);
+    }
+  } finally {
+    await service.shutdown();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("live direct transformations apply and typecheck all source formats in one call", async (context) => {
+  const directory = await mkdtemp(path.join(tmpdir(), "agda-mcp-p5-direct-"));
+  const service = await liveService(context, directory);
+  if (service === undefined) {
+    await rm(directory, { recursive: true, force: true });
+    return;
+  }
+  try {
+    for (const [name, operation] of [
+      ["Goals.agda", "refine"],
+      ["GoalsTex.lagda", "refine"],
+      ["GoalsMarkdown.lagda.md", "refine"],
+      ["Goals.agda", "auto"],
+      ["GoalsTex.lagda", "auto"],
+      ["GoalsMarkdown.lagda.md", "auto"],
+      ["CaseSplit.agda", "caseSplit"],
+      ["CaseSplitTex.lagda", "caseSplit"],
+      ["CaseSplitMarkdown.lagda.md", "caseSplit"],
+    ] as const) {
+      const modulePath = await copyFixture(directory, name);
+      const before = await readFile(modulePath, "utf8");
+      const loaded = await service.loadModule({ modulePath });
+      const goal = loaded.data.goals[0]?.handle;
+      assert.notEqual(goal, undefined, name);
+      const transformed: NormalizedResult<EditPreviewResult> = operation === "refine"
+        ? await service.refine({ goal: goal as string, expression: "x", apply: true })
+        : operation === "auto"
+          ? await service.auto({ goal: goal as string, apply: true })
+          : await service.caseSplit({ goal: goal as string, variables: "x", apply: true });
+      const after = await readFile(modulePath, "utf8");
+      assert.notEqual(after, before, `${operation} did not write ${name}`);
+      assert.equal(transformed.data.applied, true, name);
+      assert.equal(transformed.data.checked, true, name);
+      assert.deepEqual(transformed.data.diagnostics, [], name);
+      assert.equal(
+        transformed.data.sourceFingerprint,
+        createHash("sha256").update(after).digest("hex"),
+        name,
+      );
+      assert.notEqual(transformed.raw.typecheck, undefined, name);
+      assert.equal(transformed.raw.restore, undefined, name);
     }
   } finally {
     await service.shutdown();

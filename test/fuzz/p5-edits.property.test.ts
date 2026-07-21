@@ -7,7 +7,13 @@ import {
   analyzeCodeRegions,
   requireContainingCodeRegion,
 } from "../../src/normalization/codeRegions.js";
-import { applyTextEdit, planRefineEdit } from "../../src/normalization/editPlanner.js";
+import type { TextEdit } from "../../src/application/domain.js";
+import { ApplicationError } from "../../src/application/errors.js";
+import {
+  applyTextEdit,
+  applyTextEdits,
+  planRefineEdit,
+} from "../../src/normalization/editPlanner.js";
 import { sourceRangeFromUtf16Offsets } from "../../src/normalization/ranges.js";
 import { FUZZ_SEED, PROPERTY_RUNS } from "./config.js";
 
@@ -49,5 +55,65 @@ test("property: literate region extraction excludes arbitrary prose and fences",
       },
     ),
     { seed: FUZZ_SEED ^ 0x505, numRuns: PROPERTY_RUNS },
+  );
+});
+
+test("property: non-overlapping edit sets apply against one snapshot in any order", () => {
+  const segment = fc.record({
+    before: fc.string({ unit: fc.constantFrom("a", " ", "λ", "\n") }),
+    removed: fc.string({
+      unit: fc.constantFrom("b", "→", "\n"),
+      minLength: 1,
+      maxLength: 8,
+    }),
+    replacement: fc.string({ unit: fc.constantFrom("c", " ", "∀", "\n"), maxLength: 8 }),
+  });
+  fc.assert(
+    fc.property(fc.array(segment, { maxLength: 20 }), (segments) => {
+      let source = "";
+      let expected = "";
+      const offsets: Array<{ start: number; end: number; replacement: string }> = [];
+      for (const item of segments) {
+        source += item.before;
+        expected += item.before;
+        const start = source.length;
+        source += item.removed;
+        expected += item.replacement;
+        offsets.push({ start, end: source.length, replacement: item.replacement });
+      }
+      const edits: TextEdit[] = offsets.map(({ start, end, replacement }) => ({
+        file: "/workspace/P.agda",
+        range: sourceRangeFromUtf16Offsets(source, start, end),
+        replacement,
+        expectedSourceFingerprint: "sha",
+      }));
+      assert.equal(applyTextEdits(source, edits), expected);
+      assert.equal(applyTextEdits(source, [...edits].reverse()), expected);
+    }),
+    { seed: FUZZ_SEED ^ 0x50500002, numRuns: PROPERTY_RUNS },
+  );
+});
+
+test("property: overlapping or duplicate edit ranges are always rejected", () => {
+  fc.assert(
+    fc.property(
+      fc.string({ unit: fc.constantFrom("a", "λ", "\n"), minLength: 1 }),
+      fc.string(),
+      (source, replacement) => {
+        const range = sourceRangeFromUtf16Offsets(source, 0, source.length);
+        const edit: TextEdit = {
+          file: "/workspace/P.agda",
+          range,
+          replacement,
+          expectedSourceFingerprint: "sha",
+        };
+        assert.throws(
+          () => applyTextEdits(source, [edit, edit]),
+          (error: unknown) =>
+            error instanceof ApplicationError && error.code === "UNSUPPORTED_EDIT_SHAPE",
+        );
+      },
+    ),
+    { seed: FUZZ_SEED ^ 0x50500003, numRuns: PROPERTY_RUNS },
   );
 });

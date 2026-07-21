@@ -4,9 +4,12 @@ import test from "node:test";
 import fc from "fast-check";
 
 import {
+  autoInputSchema,
   inferTypeInputSchema,
+  loadModuleInputSchema,
   normalizeExpressionInputSchema,
   refineInputSchema,
+  typecheckInputSchema,
   workspaceInputSchema,
 } from "../../src/mcp/toolSchemas.js";
 import { FUZZ_SEED, PROPERTY_RUNS } from "./config.js";
@@ -27,9 +30,20 @@ test("property: scoped expression schemas accept exactly one selector", () => {
 });
 
 test("property: strict schemas reject arbitrary unknown fields", () => {
+  const known = new Set([
+    "workspace",
+    "goal",
+    "expression",
+    "usePatternLambda",
+    "apply",
+    "timeoutMs",
+    "deferAfterMs",
+    "async",
+    "includeRaw",
+  ]);
   fc.assert(
     fc.property(
-      fc.string({ minLength: 1 }).filter((key) => !["workspace", "goal", "expression", "usePatternLambda"].includes(key)),
+      fc.string({ minLength: 1 }).filter((key) => !known.has(key)),
       fc.jsonValue(),
       (key, value) => {
         assert.equal(workspaceInputSchema.safeParse({ workspace: "w", [key]: value }).success, false);
@@ -37,5 +51,42 @@ test("property: strict schemas reject arbitrary unknown fields", () => {
       },
     ),
     { seed: FUZZ_SEED ^ 0x50600002, numRuns: PROPERTY_RUNS },
+  );
+});
+
+test("property: apply accepts booleans and rejects every other JSON value", () => {
+  fc.assert(
+    fc.property(fc.jsonValue(), (apply) => {
+      assert.equal(
+        refineInputSchema.safeParse({ goal: "g", apply }).success,
+        typeof apply === "boolean",
+      );
+      assert.equal(
+        autoInputSchema.safeParse({ goal: "g", apply }).success,
+        typeof apply === "boolean",
+      );
+    }),
+    { seed: FUZZ_SEED ^ 0x50600003, numRuns: PROPERTY_RUNS },
+  );
+});
+
+test("property: module checking rejects contradictory response projections", () => {
+  fc.assert(
+    fc.property(fc.boolean(), fc.boolean(), (diagnosticsOnly, includeContexts) => {
+      const expected = !(diagnosticsOnly && includeContexts);
+      assert.equal(
+        loadModuleInputSchema.safeParse({
+          modulePath: "/workspace/P.agda",
+          diagnosticsOnly,
+          includeContexts,
+        }).success,
+        expected,
+      );
+      assert.equal(
+        typecheckInputSchema.safeParse({ workspace: "w", diagnosticsOnly, includeContexts }).success,
+        expected,
+      );
+    }),
+    { seed: FUZZ_SEED ^ 0x50600004, numRuns: PROPERTY_RUNS },
   );
 });

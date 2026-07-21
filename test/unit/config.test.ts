@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  DEFAULT_ASYNC_MODE,
   DEFAULT_COMMAND_TIMEOUT_MS,
+  DEFAULT_DEFER_AFTER_MS,
+  DEFAULT_INCLUDE_RAW,
   DEFAULT_LOAD_TIMEOUT_MS,
   DEFAULT_MAX_QUEUED_COMMANDS,
   DEFAULT_MAX_COMMAND_OUTPUT_BYTES,
@@ -36,6 +39,12 @@ test("server options apply immutable security-conscious defaults", () => {
   assert.equal(options.stderrReturnLimitBytes, DEFAULT_STDERR_RETURN_LIMIT_BYTES);
   assert.equal(options.maxCommandOutputBytes, DEFAULT_MAX_COMMAND_OUTPUT_BYTES);
   assert.equal(options.allowAgdaExec, false);
+  assert.equal(options.asyncMode, DEFAULT_ASYNC_MODE);
+  assert.equal(options.asyncMode, "auto");
+  assert.equal(options.deferAfterMs, DEFAULT_DEFER_AFTER_MS);
+  assert.equal(options.deferAfterMs, 1_000);
+  assert.equal(options.includeRawByDefault, DEFAULT_INCLUDE_RAW);
+  assert.equal(options.includeRawByDefault, false);
   assert.equal(Object.isFrozen(options), true);
   assert.equal(Object.isFrozen(options.includePaths), true);
 });

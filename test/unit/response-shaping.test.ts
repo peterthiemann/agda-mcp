@@ -50,46 +50,67 @@ async function connect(fake: string = FAKE_AGDA) {
 }
 
 function payload(result: unknown): Record<string, any> {
+  return ((result as { structuredContent?: Record<string, any> }).structuredContent ?? {});
+}
+
+function textPayload(result: unknown): Record<string, any> {
   const content = (result as { content: Array<{ text: string }> }).content;
   return JSON.parse(content[0]?.text ?? "{}") as Record<string, any>;
 }
 
-test("the native event log ships by default and is dropped only on request", async () => {
+test("the native event log is omitted by default and included only on request", async () => {
   const harness = await connect();
   try {
+    const leanResult = await harness.client.callTool({
+      name: "agda_load_module",
+      arguments: { modulePath: MODULE_PATH },
+    });
+    const lean = payload(leanResult);
+    assert.equal(lean.raw.events, undefined, "events must be omitted by default");
+    assert.equal(lean.raw.eventsOmitted, true);
+    assert.equal(typeof lean.raw.eventCount, "number");
+
     const full = payload(
       await harness.client.callTool({
         name: "agda_load_module",
-        arguments: { modulePath: MODULE_PATH },
+        arguments: { modulePath: MODULE_PATH, includeRaw: true },
       }),
     );
-    assert.equal(Array.isArray(full.raw.events), true, "events must ship by default");
+    assert.equal(Array.isArray(full.raw.events), true, "includeRaw:true must ship events");
     assert.equal(full.raw.eventsOmitted, undefined);
 
-    const lean = payload(
+    const explicitlyLean = payload(
       await harness.client.callTool({
         name: "agda_load_module",
         arguments: { modulePath: MODULE_PATH, includeRaw: false },
       }),
     );
-    assert.equal(lean.raw.events, undefined, "includeRaw:false must drop events");
-    assert.equal(lean.raw.eventsOmitted, true);
-    assert.equal(typeof lean.raw.eventCount, "number");
+    assert.equal(explicitlyLean.raw.events, undefined, "includeRaw:false must drop events");
+    assert.equal(explicitlyLean.raw.eventsOmitted, true);
     // The transcript metadata that describes truncation is still present.
-    assert.equal(typeof lean.raw.capturedBytes, "number");
-    assert.equal(typeof lean.raw.totalBytes, "number");
-    assert.notEqual(lean.raw.stderr, undefined);
+    assert.equal(typeof explicitlyLean.raw.capturedBytes, "number");
+    assert.equal(typeof explicitlyLean.raw.totalBytes, "number");
+    assert.notEqual(explicitlyLean.raw.stderr, undefined);
     // Normalized data is untouched by the raw policy.
-    assert.equal(lean.data.checked, true);
-    assert.equal(Array.isArray(lean.data.goals), true);
+    assert.equal(explicitlyLean.data.checked, true);
+    assert.equal(Array.isArray(explicitlyLean.data.goals), true);
 
     assert.equal(full.raw.events.length, lean.raw.eventCount);
+
+    const text = textPayload(leanResult);
+    assert.equal(text.summary, "Full result is available in structuredContent.");
+    assert.equal(text.checked, true);
+    assert.equal(text.raw.eventsIncluded, false);
+    assert.ok(
+      Buffer.byteLength(JSON.stringify(text)) < Buffer.byteLength(JSON.stringify(lean)) / 2,
+      "text content must be a compact summary rather than a duplicate full result",
+    );
   } finally {
     await harness.close();
   }
 });
 
-test("includeRawByDefault:false makes omission the server-wide default", async () => {
+test("includeRawByDefault:true restores native events as the server-wide default", async () => {
   const service = await AgdaApplicationService.create(
     parseServerOptions({ workspaceRoots: [FIXTURE_ROOT], commandTimeoutMs: 2_000 }),
     {
@@ -102,7 +123,7 @@ test("includeRawByDefault:false makes omission the server-wide default", async (
         }),
     },
   );
-  const server = createAgdaMcpServer(async () => service, undefined, 0, false);
+  const server = createAgdaMcpServer(async () => service, undefined, 0, true);
   const client = new Client({ name: "agda-mcp-raw-default", version: "1.0.0" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   try {
@@ -111,16 +132,16 @@ test("includeRawByDefault:false makes omission the server-wide default", async (
     const result = payload(
       await client.callTool({ name: "agda_load_module", arguments: { modulePath: MODULE_PATH } }),
     );
-    assert.equal(result.raw.events, undefined);
+    assert.equal(Array.isArray(result.raw.events), true);
 
-    // A per-call true still wins over the server default.
+    // A per-call false still wins over the server default.
     const overridden = payload(
       await client.callTool({
         name: "agda_load_module",
-        arguments: { modulePath: MODULE_PATH, includeRaw: true },
+        arguments: { modulePath: MODULE_PATH, includeRaw: false },
       }),
     );
-    assert.equal(Array.isArray(overridden.raw.events), true);
+    assert.equal(overridden.raw.events, undefined);
   } finally {
     await client.close();
     await service.shutdown();
@@ -149,6 +170,53 @@ test("diagnosticsOnly drops goals and metavariables but keeps the verdict", asyn
     assert.equal(diagnostics.data.checked, full.data.checked);
     assert.deepEqual(diagnostics.data.diagnostics, full.data.diagnostics);
     assert.equal(diagnostics.data.workspace, full.data.workspace);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("load and typecheck can include every goal context in one operation", async () => {
+  const harness = await connect(FAKE_CONTEXTS);
+  try {
+    const loaded = await harness.service.loadModule({
+      modulePath: MODULE_PATH,
+      includeContexts: true,
+    });
+    assert.equal(loaded.data.contexts?.requested, loaded.data.goals.length);
+    assert.equal(loaded.data.contexts?.succeeded, loaded.data.goals.length);
+    assert.equal(loaded.data.contexts?.failed, 0);
+    assert.deepEqual(
+      loaded.data.contexts?.contexts.map((entry) => entry.goal),
+      loaded.data.goals.map((goal) => goal.handle),
+    );
+    assert.equal(typeof loaded.data.contexts?.contexts[0]?.context?.goalType, "string");
+
+    const checked = await harness.service.typecheck({
+      workspace: loaded.data.workspace,
+      includeContexts: true,
+    });
+    assert.equal(checked.data.contexts?.requested, checked.data.goals.length);
+    assert.deepEqual(
+      checked.data.contexts?.contexts.map((entry) => entry.goal),
+      checked.data.goals.map((goal) => goal.handle),
+    );
+  } finally {
+    await harness.close();
+  }
+});
+
+test("compound inspection rejects contradictory diagnostics-only shaping", async () => {
+  const harness = await connect(FAKE_CONTEXTS);
+  try {
+    const rejected = await harness.client.callTool({
+      name: "agda_load_module",
+      arguments: {
+        modulePath: MODULE_PATH,
+        includeContexts: true,
+        diagnosticsOnly: true,
+      },
+    });
+    assert.equal(rejected.isError, true);
   } finally {
     await harness.close();
   }

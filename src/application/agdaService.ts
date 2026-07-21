@@ -20,6 +20,7 @@ import type {
   RetrieveContextRequest,
   RetrieveContextsRequest,
   ServerInfo,
+  TypecheckRequest,
   WorkspaceRequest,
 } from "./domain.js";
 
@@ -30,7 +31,7 @@ export interface AgdaService {
     context?: OperationContext,
   ): Promise<NormalizedResult<ModuleCheckResult>>;
   typecheck(
-    request: WorkspaceRequest,
+    request: TypecheckRequest,
     context?: OperationContext,
   ): Promise<NormalizedResult<ModuleCheckResult>>;
   retrieveGoals(

@@ -13,10 +13,10 @@ export const DEFAULT_PROBE_TIMEOUT_MS = 10_000;
 export const DEFAULT_PROBE_MAX_BUFFER_BYTES = 1024 * 1024;
 export const DEFAULT_HANDLE_ENTROPY_BYTES = 24;
 
-// Deferral changes the shape of a successful tool response, so it is
-// opt-in: enable it globally with asyncMode, or per call with async/deferAfterMs.
-export const DEFAULT_ASYNC_MODE = "never";
-export const DEFAULT_DEFER_AFTER_MS = 2_500;
+// Slow commands defer by default so one expensive Agda load cannot hold an
+// agent turn open indefinitely. Per-call async:false restores synchronous use.
+export const DEFAULT_ASYNC_MODE = "auto";
+export const DEFAULT_DEFER_AFTER_MS = 1_000;
 export const DEFAULT_MAX_JOB_WAIT_MS = 30_000;
 export const DEFAULT_JOB_RETENTION_MS = 300_000;
 export const DEFAULT_MAX_TRACKED_JOBS = 64;
@@ -24,9 +24,10 @@ export const DEFAULT_MAX_TRACKED_JOBS = 64;
 // drive an unbounded amount of Agda work or response size.
 export const DEFAULT_MAX_BATCH_GOALS = 32;
 export const DEFAULT_PROGRESS_INTERVAL_MS = 2_000;
-// The normalized-plus-native-raw contract is part of the published API, so
-// the transcript ships by default; includeRaw: false is the opt-in optimization.
-export const DEFAULT_INCLUDE_RAW = true;
+// Native events remain available per call, but normalized responses are the
+// fast default: large raw transcripts otherwise dominate MCP serialization and
+// agent context even when the caller never inspects them.
+export const DEFAULT_INCLUDE_RAW = false;
 
 export const ASYNC_MODES = Object.freeze(["auto", "never", "always"] as const);
 export type AsyncMode = (typeof ASYNC_MODES)[number];

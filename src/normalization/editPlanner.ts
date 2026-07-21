@@ -134,9 +134,46 @@ export function planCaseSplitEdit(
 }
 
 export function applyTextEdit(source: string, editValue: TextEdit): string {
-  return (
-    source.slice(0, editValue.range.start.utf16Offset) +
-    editValue.replacement +
-    source.slice(editValue.range.end.utf16Offset)
+  return applyTextEdits(source, [editValue]);
+}
+
+/** Apply a non-overlapping edit set against one immutable UTF-16 snapshot. */
+export function applyTextEdits(source: string, edits: readonly TextEdit[]): string {
+  const ordered = [...edits].sort(
+    (left, right) =>
+      left.range.start.utf16Offset - right.range.start.utf16Offset ||
+      left.range.end.utf16Offset - right.range.end.utf16Offset,
   );
+  let previousEnd = -1;
+  let previousStart = -1;
+  for (const editValue of ordered) {
+    const start = editValue.range.start.utf16Offset;
+    const end = editValue.range.end.utf16Offset;
+    if (
+      !Number.isSafeInteger(start) ||
+      !Number.isSafeInteger(end) ||
+      start < 0 ||
+      end < start ||
+      end > source.length
+    ) {
+      throw new ApplicationError("UNSUPPORTED_EDIT_SHAPE", "Edit range is outside the source snapshot", {
+        details: { start, end, sourceLength: source.length },
+      });
+    }
+    if (start < previousEnd || start === previousStart) {
+      throw new ApplicationError("UNSUPPORTED_EDIT_SHAPE", "Edit ranges overlap or are ambiguous", {
+        details: { start, end, previousStart, previousEnd },
+      });
+    }
+    previousStart = start;
+    previousEnd = end;
+  }
+
+  let result = source;
+  for (const editValue of ordered.reverse()) {
+    const start = editValue.range.start.utf16Offset;
+    const end = editValue.range.end.utf16Offset;
+    result = result.slice(0, start) + editValue.replacement + result.slice(end);
+  }
+  return result;
 }

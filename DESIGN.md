@@ -1,7 +1,7 @@
 # Agda MCP Server: Initial Design
 
-Status: draft for discussion  
-Date: 2026-07-18  
+Status: implemented; updated with post-0.2 extensions
+Date: 2026-07-18
 Tested Agda baseline: 2.8.0
 
 ## 1. Purpose
@@ -12,9 +12,9 @@ directly to a long-lived `agda --interaction-json` subprocess and translates
 between stable, normalized MCP schemas and Agda's editor-facing interaction
 protocol.
 
-The initial server is intentionally non-mutating: operations that would
-normally cause an editor to change source text return proposed edits, but do
-not write them to disk.
+Transformation operations are non-mutating by default: they return proposed
+edits and restore canonical Agda state. A caller may explicitly request a
+fingerprint-guarded atomic write followed by an immediate typecheck.
 
 ## 2. Decisions made
 
@@ -28,10 +28,10 @@ not write them to disk.
 | Loaded state | One top-level module per workspace |
 | Concurrency | Serialized within a workspace; independent across workspaces |
 | Source model | On-disk `.agda`, `.lagda`, and `.lagda.md` files |
-| Transformations | Return proposed edits; never write files |
-| Preview recovery | Reload the unchanged module after each transformation |
+| Transformations | Preview by default; guarded write and typecheck with `apply: true` |
+| Preview recovery | Reload the unchanged module after each preview |
 | Goal selection | Opaque goal handles only |
-| Public results | Normalized objects with native Agda events in `raw` |
+| Public results | Normalized objects plus bounded `raw` metadata; native events on request |
 | Configuration | MCP initialization options plus `.agda-lib` discovery; no mandatory new config file |
 | Version baseline | Agda 2.8.0, detected rather than hardcoded at runtime |
 | Node.js baseline | Node.js 22 or newer; CI tests Node.js 22 and 24 |
@@ -43,7 +43,8 @@ not write them to disk.
 
 - Load and typecheck an Agda top-level module.
 - Retrieve goals, goal-local context, constraints, and metavariables.
-- Propose edits for case splitting, refinement, and automatic proof search.
+- Preview or guardedly apply edits for case splitting, refinement, and
+  automatic proof search.
 - Normalize an expression and infer an expression's type, either at top level
   or in a goal's local context.
 - Keep Agda interaction state alive between calls.
@@ -55,7 +56,7 @@ not write them to disk.
 
 ## 4. Non-goals for the first version
 
-- Directly modifying Agda source files.
+- Applying edits without an explicit per-call opt-in and matching fingerprint.
 - Supporting unsaved or virtual editor buffers.
 - Keeping multiple top-level modules loaded in one workspace.
 - Streamable HTTP transport.
@@ -359,6 +360,7 @@ interface RawCommandTranscript {
 interface RawAgdaResponse extends RawCommandTranscript {
   adapter: string;
   restore?: RawCommandTranscript;
+  typecheck?: RawCommandTranscript;
 }
 
 interface NormalizedResult<T> {
@@ -368,10 +370,13 @@ interface NormalizedResult<T> {
 }
 ```
 
-`raw` is present on every successful tool result. For a cached value, `raw`
-contains the latest native event sequence that established that value. The
-initial retrieval tools should generally query Agda rather than rely on cache,
-so callers receive a fresh native response.
+`raw` is present on every successful internal service result. For a cached
+value, it contains the latest native event sequence that established that
+value. Retrieval tools generally query Agda rather than rely on cache, so the
+service receives a fresh native response. On the MCP wire, native events are
+omitted by default in favor of byte/completeness metadata; `includeRaw: true`
+restores them. MCP text content is a compact summary and the complete normalized
+object is sent once as structured content.
 
 ### 9.1 Raw-response budgets
 
@@ -421,7 +426,7 @@ session.
 Input:
 
 ```ts
-{ modulePath: string }
+{ modulePath: string; includeContexts?: boolean }
 ```
 
 Requires an absolute on-disk source path. It resolves the workspace, lazily
@@ -438,6 +443,10 @@ version/adapter information, and raw events.
 Type errors are normal tool data (`checked: false` plus diagnostics), not MCP
 transport errors.
 
+With `includeContexts: true`, the result also contains one ordered context
+entry for every new goal handle. This collapses the common load, list-goals,
+and inspect-context sequence into one transport operation.
+
 Agda 2.8.0 mapping:
 
 ```text
@@ -449,7 +458,7 @@ Cmd_load <absolute-module-path> <resolved-arguments>
 Input:
 
 ```ts
-{ workspace: WorkspaceHandle }
+{ workspace: WorkspaceHandle; includeContexts?: boolean }
 ```
 
 Forces the active module through the same load/typecheck cycle as
@@ -493,13 +502,15 @@ Input:
 {
   goal: GoalHandle;
   variables?: string; // empty means split on the result
+  apply?: boolean;
 }
 ```
 
 Maps to `Cmd_make_case`. Agda 2.8.0 returns a `MakeCase` event containing a
 variant and replacement clauses. `EditPlanner` derives the enclosing clause or
 extended-lambda range from the validated source snapshot and returns one or
-more proposed `TextEdit` values. No edit is applied.
+more proposed `TextEdit` values. Preview is the default; `apply: true` requests
+the guarded write and typecheck transaction described in section 11.
 
 ### 10.8 `agda_refine`
 
@@ -510,12 +521,14 @@ Input:
   goal: GoalHandle;
   expression?: string;
   usePatternLambda?: boolean;
+  apply?: boolean;
 }
 ```
 
 Maps to `Cmd_refine_or_intro`. An omitted or empty expression permits Agda's
 intro/single-constructor refinement behavior. A `GiveAction` becomes a proposed
-edit replacing the goal range. No edit is applied.
+edit replacing the goal range. Preview is the default; `apply: true` uses the
+guarded write and typecheck transaction.
 
 ### 10.9 `agda_auto`
 
@@ -525,13 +538,15 @@ Input:
 {
   goal: GoalHandle;
   query?: string;
+  apply?: boolean;
 }
 ```
 
 Maps to Agda 2.8.0's `Cmd_autoOne AsIs`, described by Agda's editor mode as
 simple proof search. A successful `GiveAction` becomes a proposed edit. Failure
 to find a proof is returned as a normalized unsuccessful search result, not as
-a process failure.
+a process failure. `apply: true` applies a found proposal through the same
+guarded transaction and leaves an unsuccessful empty proposal non-mutating.
 
 ### 10.10 `agda_normalize_expression`
 
@@ -580,10 +595,11 @@ This tool cannot promise every internal typechecker metavariable: its scope is
 exactly the information Agda exposes through the 2.8.0 interaction backend.
 This limitation is reported in server capabilities.
 
-## 11. Non-mutating transformation transactions
+## 11. Transformation transactions
 
-`case_split`, `refine`, and `auto` are treated as state-mutating commands even
-if a particular Agda version appears not to mutate state for one of them.
+`case_split`, `refine`, and `auto` are treated as state-mutating backend
+commands even if a particular Agda version appears not to mutate state for one
+of them. Files remain unchanged unless the request contains `apply: true`.
 
 Every transformation executes as a transaction under the workspace queue:
 
@@ -604,10 +620,12 @@ Conceptual result:
 ```ts
 interface EditProposalResult {
   edits: TextEdit[];
-  restoredRevision: number;
-  restoredGoals: GoalSummary[];
+  applied: boolean;
+  checked: boolean;
   diagnostics: Diagnostic[];
   sourceFingerprint: string;
+  restoredRevision: number;
+  restoredGoals: GoalSummary[];
 }
 ```
 
@@ -619,6 +637,17 @@ safe to apply when canonical state could not be restored.
 This model intentionally incurs one reload/typecheck and invalidates goal
 handles after each preview. It keeps the primary process aligned with disk and
 avoids temporary shadow files or secondary Agda processes.
+
+With `apply: true`, steps 7–10 instead atomically replace the active source
+after one final fingerprint check, load/typecheck the edited module, and return
+the verdict, diagnostics, new fingerprint, and fresh handles. The operation
+and typecheck transcripts are kept separately. If the canonical load fails,
+the server attempts an atomic rollback only while the edited fingerprint still
+matches. A detected concurrent external change prevents application or
+rollback. The server reports file-mutation capability as `"opt-in"`. A
+completed Agda load with type errors is returned as `checked: false` and keeps
+the applied edit; rollback is reserved for process, protocol, or other failures
+that prevent a canonical result.
 
 ## 12. Concurrency, cancellation, and recovery
 
@@ -657,7 +686,7 @@ Application errors use stable codes and include recoverability guidance:
 | `COMMAND_TIMEOUT` | Command exceeded its policy timeout |
 | `PROCESS_EXITED` | Agda terminated unexpectedly |
 | `OUTPUT_LIMIT_EXCEEDED` | Child output exceeded the configured safety limit |
-| `RESTORE_FAILED` | Transformation preview could not restore canonical state |
+| `RESTORE_FAILED` | A transformation could not restore/typecheck canonical state safely |
 
 Agda type errors, unsolved goals, warnings, and failed proof search are domain
 results rather than MCP protocol errors whenever Agda completed the command
@@ -665,7 +694,8 @@ normally.
 
 ## 14. Security and safety
 
-- The initial server never writes source files.
+- Source writes require `apply: true`, a proposal for the active file, and an
+  exact matching fingerprint immediately before atomic replacement.
 - Canonical real paths are checked against configured workspace roots.
 - Child processes are spawned without a shell.
 - Interaction strings use a dedicated encoder rather than interpolation.
@@ -782,6 +812,10 @@ against the normalizer so schema regressions do not require an Agda process.
 - Confirm reload-after-preview restores the original goals and returns new
   handles.
 - Confirm case-split/refine edits preserve literate code delimiters and prose.
+- Confirm opted-in case-split/refine/auto edits are atomically applied and
+  typechecked across all three source formats.
+- Race an external source change against a direct edit and confirm it is never
+  overwritten; force canonical-load failure and confirm guarded rollback.
 - Modify a file between load and command and expect `SOURCE_CHANGED`.
 - Exercise two workspace processes concurrently while commands within each
   remain serialized.
@@ -808,8 +842,6 @@ call every tool. Assert that no Agda output corrupts MCP stdout framing.
 
 ## 18. Deferred extensions
 
-- An explicitly enabled file-mutation layer that applies a proposal only when
-  its expected source fingerprint still matches, then typechecks the result.
 - Streamable HTTP implemented as another `McpTransport`.
 - Multiple loaded module states per workspace.
 - Unsaved buffer support using explicitly managed temporary snapshots.

@@ -1,13 +1,15 @@
 # agda-mcp
 
-`agda-mcp` is a standalone, non-mutating MCP server for Agda's JSON
+`agda-mcp` is a standalone MCP server for Agda's JSON
 interaction protocol. It keeps one long-lived `agda --interaction-json`
 process per active workspace and supports on-disk `.agda`, `.lagda`, and
 `.lagda.md` modules.
 
 The server exposes normalized, transport-independent results while retaining
-Agda's native response events in a bounded `raw` field. Case split, refine, and
-auto return fingerprinted edit proposals; they never write source files.
+bounded metadata about Agda's native responses in a `raw` field. Native events
+are available on request. Case split, refine, and auto are non-mutating by
+default; an explicit `apply: true` atomically writes the guarded proposal and
+typechecks it in the same operation.
 
 ## End-to-end example
 
@@ -85,6 +87,20 @@ the same fingerprinted `edits` shape and follows the same apply-then-typecheck
 flow. Preview operations reload canonical Agda state before returning, so only
 goal handles from the latest response should be used.
 
+For the faster compound forms, set `includeContexts: true` on step 1 to receive
+the goals and every goal context with the load result. Set `apply: true` on
+step 4 to have the server perform steps 5 and 6 as one guarded transaction:
+
+```text
+agda_case_split({ "goal": "goal_…", "variables": "x", "apply": true })
+→ data.applied = true
+→ data.checked = true
+→ data.goals = <fresh handles from the edited module>
+```
+
+The preview flow above remains the default and is useful when the client wants
+to inspect or revise the proposal before changing the file.
+
 ## Requirements
 
 - Node.js 22 or newer
@@ -160,13 +176,13 @@ Unknown fields and invalid limits are rejected before an Agda process starts.
 | `probeTimeoutMs` | Installation-probe timeout | `10000` |
 | `probeMaxBufferBytes` | Installation-probe output buffer | `1048576` |
 | `handleEntropyBytes` | Random bytes per workspace/goal/job handle (min `16`) | `24` |
-| `asyncMode` | `never`, `auto`, or `always`; see below | `never` |
-| `deferAfterMs` | How long a tool call may block before deferring to a job | `2500` |
+| `asyncMode` | `never`, `auto`, or `always`; see below | `auto` |
+| `deferAfterMs` | How long a tool call may block before deferring to a job | `1000` |
 | `maxJobWaitMs` | Ceiling on a single `agda_job_await` wait | `30000` |
 | `jobRetentionMs` | How long an uncollected finished job is kept | `300000` |
 | `maxTrackedJobs` | Maximum concurrently tracked jobs | `64` |
 | `progressIntervalMs` | Heartbeat for `notifications/progress` | `2000` |
-| `includeRawByDefault` | Ship Agda's native event log | `true` |
+| `includeRawByDefault` | Ship Agda's native event log | `false` |
 | `maxBatchGoals` | Maximum goals one batched request may resolve | `32` |
 
 ## Non-blocking operation
@@ -174,15 +190,14 @@ Unknown fields and invalid limits are rejected before an Agda process starts.
 Typechecking a large development can take minutes, and holding the MCP request
 open for that whole time stalls the calling agent completely.
 
-Deferral changes the shape of a successful tool response, so it is **opt-in**.
-Enable it globally with `asyncMode: "auto"`, or per call with `async: true` or
-`deferAfterMs`. With it enabled, a call that outruns `deferAfterMs` returns a
-job handle instead of blocking:
+Slow calls defer by default so one expensive load does not hold an agent turn
+open indefinitely. A call that outruns `deferAfterMs` returns a job handle
+instead of blocking:
 
 ```json
 {
   "status": "pending",
-  "job": { "id": "job_...", "tool": "agda_load_module", "state": "running", "elapsedMs": 2500 },
+  "job": { "id": "job_...", "tool": "agda_load_module", "state": "running", "elapsedMs": 1000 },
   "guidance": "Agda is still working ... call agda_job_await with job \"job_...\""
 }
 ```
@@ -192,14 +207,16 @@ else, and the result is collected later with `agda_job_await`. Calls that
 finish inside the window return their result inline, exactly as before, so
 fast operations are unchanged.
 
-`asyncMode` controls the policy: `never` (default) always blocks until Agda
-finishes, `auto` defers only calls slower than `deferAfterMs`, and `always`
-defers every call.
+`asyncMode` controls the policy: `auto` (default) defers only calls slower than
+`deferAfterMs`, `never` always blocks until Agda finishes, and `always` defers
+every call. Set `async: false` on one call, or configure `asyncMode: "never"`,
+when a client requires the legacy fully synchronous behavior.
 
 ### Per-call overrides
 
-Every Agda tool also accepts these fields, which shadow the configured values
-for one call only:
+The transport supports these per-call fields; the tool-specific ones are
+accepted only where indicated. Policy fields shadow configured values for one
+call only:
 
 | Field | Meaning |
 | --- | --- |
@@ -208,6 +225,8 @@ for one call only:
 | `async` | `true` always returns a job handle; `false` blocks until Agda finishes |
 | `includeRaw` | Include Agda's native event log (see below) |
 | `diagnosticsOnly` | `agda_load_module` / `agda_typecheck` only: errors and warnings |
+| `includeContexts` | `agda_load_module` / `agda_typecheck` only: include all goal contexts |
+| `apply` | Transformation tools only: guarded write followed by an immediate typecheck |
 
 ```json
 { "modulePath": "/src/Slow.agda", "timeoutMs": 600000, "async": true }
@@ -251,9 +270,9 @@ registered imports may live elsewhere.
 | `agda_retrieve_context` | Retrieve a goal type, local context, and boundary |
 | `agda_retrieve_contexts` | Retrieve contexts for several goals in one round trip |
 | `agda_retrieve_constraints` | Retrieve current constraints |
-| `agda_case_split` | Preview case-split clause edits |
-| `agda_refine` | Preview a refinement or introduction edit |
-| `agda_auto` | Preview simple proof search |
+| `agda_case_split` | Preview case-split clauses, or apply and typecheck them |
+| `agda_refine` | Preview a refinement/introduction, or apply and typecheck it |
+| `agda_auto` | Preview proof search, or apply and typecheck its solution |
 | `agda_normalize_expression` | Normalize in top-level or goal-local scope |
 | `agda_infer_type` | Infer a type in top-level or goal-local scope |
 | `agda_query_metavariables` | Query visible and backend-published invisible metas |
@@ -275,25 +294,34 @@ reaching Agda.
 
 ## Response size
 
-Agda's native event log ships by default, as the normalized-plus-native-`raw`
-contract requires. Because it is the largest part of a response, `includeRaw:
-false` is offered as an opt-in optimization: it replaces `raw.events` with a
-summary — `eventsOmitted`, `eventCount`, byte counts, completeness, stderr — so
-truncation stays detectable:
+Agda's native event log is the largest part of most responses, so it is omitted
+by default. The `raw` field instead contains a summary — `eventsOmitted`,
+`eventCount`, byte counts, completeness, and stderr — so truncation stays
+detectable:
 
 ```json
 { "adapter": "agda-2.8.0", "eventsOmitted": true, "eventCount": 7,
   "capturedBytes": 812, "totalBytes": 812, "stderr": { "chunks": [] } }
 ```
 
-Set `includeRawByDefault: false` to make omission the server-wide default. A
-per-call `includeRaw` always wins over the server default.
+Set `includeRaw: true` for a call that needs the native event sequence, or set
+`includeRawByDefault: true` to restore it globally. A per-call value always
+wins over the server default.
+
+MCP `content` contains only a compact human-readable summary. The complete
+normalized result is sent once in `structuredContent`, avoiding the previous
+cost of serializing and transmitting the same large object twice.
 
 `diagnosticsOnly: true` further drops `goals` and `invisibleMetavariables` from
 a load or typecheck, leaving the verdict and diagnostics — useful for the common
 "did it compile?" question.
 
 ## Batched goal contexts
+
+For the common load-and-inspect path, `includeContexts: true` on
+`agda_load_module` or `agda_typecheck` retrieves every newly returned goal
+context in that same operation. It uses the same bounded aggregation policy as
+the explicit batch tool below.
 
 `agda_retrieve_contexts` takes a list of goal handles and returns one entry per
 goal, in request order:
@@ -319,9 +347,10 @@ single `rawResponseLimitBytes` budget, so a batch cannot build a response
 larger than one command may. The combined `omittedSha256` covers each source
 transcript's own omission digest followed by every event the merge dropped.
 
-## Non-mutating edit previews
+## Transformation previews and guarded direct edits
 
-Case split, refine, and auto use one transaction model:
+Without `apply`, case split, refine, and auto use the non-mutating preview
+transaction:
 
 1. Validate the goal handle and loaded source fingerprint.
 2. Ask Agda for a proposal.
@@ -335,6 +364,20 @@ Each edit carries its absolute file path, exact UTF-16 range, replacement text,
 and expected SHA-256 source fingerprint. Clients should verify that fingerprint
 before applying an edit, then call `agda_typecheck`. If restoration fails, the
 server terminates and invalidates the session and returns no safe proposal.
+
+With `apply: true`, the server verifies the proposal targets the active module
+and fingerprint, rechecks the source immediately before writing, replaces the
+file atomically, and reloads/typechecks it once. The result reports `applied`,
+`checked`, `diagnostics`, the new source fingerprint, and fresh goal handles.
+If the canonical reload itself fails, the server attempts a fingerprint-guarded
+rollback and refuses that rollback when the edited fingerprint no longer
+matches. Changes detected during proposal generation or immediately before an
+atomic replacement are rejected. File mutation is therefore opt-in per
+transformation call, while preview remains the default.
+An ordinary Agda type error is a completed result (`checked: false`), so the
+applied source remains on disk and its diagnostics are returned for the caller
+to address; rollback is reserved for failures that prevent a trustworthy
+canonical result.
 
 Literate prose and code delimiters are excluded from editable code regions.
 An ambiguous or cross-region proposal fails with `UNSUPPORTED_EDIT_SHAPE`.
