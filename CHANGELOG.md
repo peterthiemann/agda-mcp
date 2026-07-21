@@ -3,7 +3,7 @@
 This file records notable changes to `agda-mcp`, with the most recent release
 first.
 
-## [Unreleased]
+## [0.3.0] - 2026-07-21
 
 ### Added
 
@@ -82,5 +82,6 @@ first.
 - Added unit, integration, property-based, mutation-fuzz, live-Agda, MCP stdio,
   smoke, and packed-install tests.
 
+[0.3.0]: https://github.com/peterthiemann/agda-mcp/compare/release-0.2.0...release-0.3.0
 [0.2.0]: https://github.com/peterthiemann/agda-mcp/compare/release-0.1.0...release-0.2.0
 [0.1.0]: https://github.com/peterthiemann/agda-mcp/releases/tag/release-0.1.0

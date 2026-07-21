@@ -454,12 +454,12 @@ version, commit and push that change, then push an annotated tag named
 the resulting version must match `package.json` exactly. For example:
 
 ```sh
-npm version 0.2.0 --no-git-tag-version
+npm version 0.3.0 --no-git-tag-version
 git add package.json package-lock.json
-git commit -m "Release 0.2.0"
+git commit -m "Release 0.3.0"
 git push
-git tag -a release-0.2.0 -m "Release 0.2.0"
-git push origin release-0.2.0
+git tag -a release-0.3.0 -m "Release 0.3.0"
+git push origin release-0.3.0
 ```
 
 The tag workflow validates the version, installs from the lockfile, runs the
