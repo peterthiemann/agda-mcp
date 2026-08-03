@@ -7,6 +7,12 @@ first.
 
 ### Added
 
+- Added the `--dynamic-workspaces` startup flag and matching
+  `allowDynamicWorkspaces` initialization option. When enabled,
+  `agda_load_module` accepts an absolute `workspaceRoot`, allowing the model to
+  select and lazily start a workspace without per-project MCP configuration.
+- Added `capabilities.workspaceSelection` to `agda_server_info` so clients can
+  distinguish configured-root and request-selected workspace policies.
 - Added the `--apply-edits` startup flag and matching
   `applyEditsByDefault` initialization option. When enabled, case split,
   refine, and auto atomically update and typecheck the active source without a
@@ -19,6 +25,8 @@ first.
 
 - Extended unit, property-based, and live-Agda coverage for server-wide
   mutation policy, per-call overrides, and all supported literate formats.
+- Extended canonical-path, schema, CLI, and MCP-service coverage for dynamic
+  workspace authorization and containment.
 
 ## [0.3.0] - 2026-07-21
 

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  DEFAULT_ALLOW_DYNAMIC_WORKSPACES,
   DEFAULT_APPLY_EDITS_BY_DEFAULT,
   DEFAULT_ASYNC_MODE,
   DEFAULT_COMMAND_TIMEOUT_MS,
@@ -27,6 +28,8 @@ test("server options apply immutable security-conscious defaults", () => {
 
   assert.equal(options.agdaExecutable, "agda");
   assert.deepEqual(options.workspaceRoots, []);
+  assert.equal(options.allowDynamicWorkspaces, DEFAULT_ALLOW_DYNAMIC_WORKSPACES);
+  assert.equal(options.allowDynamicWorkspaces, false);
   assert.deepEqual(options.includePaths, []);
   assert.deepEqual(options.libraries, []);
   assert.deepEqual(options.additionalFlags, []);
@@ -57,6 +60,7 @@ test("server options parse workspace-specific overrides", () => {
     workspaceRoots: ["/workspace"],
     includePaths: ["global"],
     allowAgdaExec: true,
+    allowDynamicWorkspaces: true,
     applyEditsByDefault: true,
     additionalFlags: ["--allow-exec"],
     workspaceOverrides: [
@@ -71,6 +75,7 @@ test("server options parse workspace-specific overrides", () => {
   });
 
   assert.equal(options.allowAgdaExec, true);
+  assert.equal(options.allowDynamicWorkspaces, true);
   assert.equal(options.applyEditsByDefault, true);
   assert.deepEqual(options.workspaceOverrides[0], {
     root: "/workspace",
@@ -108,6 +113,7 @@ test("server options reject malformed and inconsistent limits", () => {
   assert.throws(() => parseServerOptions({ loadTimeoutMs: 0 }), isInvalidArgument);
   assert.throws(() => parseServerOptions({ maxQueuedCommands: 0 }), isInvalidArgument);
   assert.throws(() => parseServerOptions({ includePaths: [""] }), isInvalidArgument);
+  assert.throws(() => parseServerOptions({ allowDynamicWorkspaces: "yes" }), isInvalidArgument);
   assert.throws(() => parseServerOptions({ applyEditsByDefault: "yes" }), isInvalidArgument);
   assert.throws(
     () => parseServerOptions({ rawResponseLimitBytes: 2, maxCommandOutputBytes: 1 }),

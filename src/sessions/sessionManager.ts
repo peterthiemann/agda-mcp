@@ -41,12 +41,14 @@ export class WorkspaceSessionManager {
 
   async loadModule(
     modulePath: string,
+    workspaceRoot?: string,
     options: SendCommandOptions = {},
   ): Promise<NormalizedResult<ModuleCheckResult>> {
     const plan = await discoverModulePlan(
       modulePath,
       this.#options.serverOptions,
       this.#options.installation,
+      workspaceRoot,
     );
     let session = this.#byRoot.get(plan.projectRoot);
     if (session === undefined) {

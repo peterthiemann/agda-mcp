@@ -219,3 +219,56 @@ test("workspace overrides must resolve to configured workspace roots", async () 
     await rm(sandbox, { recursive: true, force: true });
   }
 });
+
+test("request-selected workspaces require opt-in and remain bounded by their canonical root", async () => {
+  const sandbox = await temporaryDirectory("dynamic-workspace");
+  const configured = path.join(sandbox, "configured");
+  const requested = path.join(sandbox, "requested");
+  const nested = path.join(requested, "src");
+  const modulePath = path.join(nested, "Dynamic.agda");
+  const outsideModule = path.join(configured, "Outside.agda");
+  try {
+    await mkdir(configured);
+    await mkdir(nested, { recursive: true });
+    await writeFile(modulePath, "module Dynamic where\n", "utf8");
+    await writeFile(outsideModule, "module Outside where\n", "utf8");
+
+    const restricted = parseServerOptions({ workspaceRoots: [configured] });
+    await assert.rejects(
+      discoverModulePlan(modulePath, restricted, INSTALLATION, requested),
+      hasCode("PATH_OUTSIDE_WORKSPACE"),
+    );
+
+    const dynamic = parseServerOptions({
+      workspaceRoots: [configured],
+      allowDynamicWorkspaces: true,
+    });
+    const plan = await discoverModulePlan(modulePath, dynamic, INSTALLATION, requested);
+    assert.equal(plan.workspaceRoot, await realpath(requested));
+    assert.equal(plan.modulePath, await realpath(modulePath));
+
+    await assert.rejects(
+      discoverModulePlan(outsideModule, dynamic, INSTALLATION, requested),
+      hasCode("PATH_OUTSIDE_WORKSPACE"),
+    );
+  } finally {
+    await rm(sandbox, { recursive: true, force: true });
+  }
+});
+
+test("the transport-independent service can use only a request-selected workspace", async () => {
+  const workspace = await temporaryDirectory("dynamic-only");
+  const modulePath = path.join(workspace, "Only.agda");
+  try {
+    await writeFile(modulePath, "module Only where\n", "utf8");
+    const plan = await discoverModulePlan(
+      modulePath,
+      parseServerOptions({ allowDynamicWorkspaces: true }),
+      INSTALLATION,
+      workspace,
+    );
+    assert.equal(plan.workspaceRoot, await realpath(workspace));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});

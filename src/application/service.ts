@@ -270,6 +270,7 @@ export class AgdaApplicationService implements AgdaService {
           sourceFormats: Object.freeze(["agda", "lagda", "lagda.md"] as const),
           mutatesFiles: "opt-in",
           transformationDefault: this.#options.applyEditsByDefault ? "apply" : "preview",
+          workspaceSelection: this.#options.allowDynamicWorkspaces ? "request" : "configured",
           metavariableScope: "interaction-backend",
         }),
       }),
@@ -282,7 +283,11 @@ export class AgdaApplicationService implements AgdaService {
     request: LoadModuleRequest,
     context?: OperationContext,
   ): Promise<NormalizedResult<ModuleCheckResult>> {
-    const loaded = await this.#sessions.loadModule(request.modulePath, signalOptions(context));
+    const loaded = await this.#sessions.loadModule(
+      request.modulePath,
+      request.workspaceRoot,
+      signalOptions(context),
+    );
     return request.includeContexts === true ? this.#withContexts(loaded, context) : loaded;
   }
 

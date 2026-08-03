@@ -33,6 +33,7 @@ fingerprint-guarded atomic write followed by an immediate typecheck.
 | Goal selection | Opaque goal handles only |
 | Public results | Normalized objects plus bounded `raw` metadata; native events on request |
 | Configuration | MCP initialization options plus `.agda-lib` discovery; no mandatory new config file |
+| Runtime workspace selection | Restricted by default; `--dynamic-workspaces` permits a request-provided root |
 | Version baseline | Agda 2.8.0, detected rather than hardcoded at runtime |
 | Node.js baseline | Node.js 22 or newer; CI tests Node.js 22 and 24 |
 | Package manager | npm with a committed `package-lock.json` |
@@ -109,13 +110,19 @@ against the exact source snapshot used for the command.
 
 ### 6.1 Workspace selection
 
-Every module-loading request supplies an absolute source path. The server:
+Every module-loading request supplies an absolute source path and may supply an
+absolute `workspaceRoot`. The server:
 
-1. Resolves symlinks for both the source path and configured MCP workspace roots.
-2. Rejects a source file outside all configured roots.
-3. Walks upward from the source file to find the nearest `.agda-lib` file.
-4. Uses that file's directory as the Agda project root.
-5. Falls back to the containing MCP workspace root if there is no `.agda-lib`.
+1. Resolves symlinks for the source path, requested root, and configured MCP
+   workspace roots.
+2. Requires the source file to remain inside the selected root.
+3. When `workspaceRoot` is supplied, accepts a root outside the configured
+   allowlist only if `allowDynamicWorkspaces` was enabled at server startup.
+4. Without a requested root, selects the most specific configured root that
+   contains the source.
+5. Walks upward from the source file to find the nearest `.agda-lib` file.
+6. Uses that file's directory as the Agda project root.
+7. Falls back to the selected workspace root if there is no `.agda-lib`.
 
 The initial source-format allowlist is case-sensitive and accepts `.agda`,
 `.lagda`, and `.lagda.md`, checking the compound `.lagda.md` suffix before the
@@ -136,7 +143,8 @@ response cannot be mapped safely to one code region, the server returns
 
 The canonical project root is the workspace-session key. Imported registered
 libraries may live outside the workspace, but they cannot become direct tool
-targets unless explicitly configured as workspace roots.
+targets unless explicitly configured or selected while dynamic workspaces are
+enabled.
 
 ### 6.2 Agda configuration
 
@@ -145,6 +153,8 @@ Configuration comes from MCP server initialization options. Suggested fields:
 ```ts
 interface ServerOptions {
   agdaExecutable?: string;       // default: resolve `agda` from PATH
+  workspaceRoots?: string[];     // default: MCP roots or server cwd
+  allowDynamicWorkspaces?: boolean; // default: false; CLI: --dynamic-workspaces
   includePaths?: string[];
   libraries?: string[];
   libraryFile?: string;
@@ -418,23 +428,26 @@ several MCP servers.
 ### 10.1 `agda_server_info`
 
 Returns the resolved executable, detected version, application/data directories,
-selected adapter, compatibility status, configured workspace roots, and current
-workspace-session summaries. It does not start every possible workspace
-session.
+selected adapter, compatibility status, configured workspace roots, effective
+workspace-selection policy, and current workspace-session summaries. It does
+not start every possible workspace session.
 
 ### 10.2 `agda_load_module`
 
 Input:
 
 ```ts
-{ modulePath: string; includeContexts?: boolean }
+{ modulePath: string; workspaceRoot?: string; includeContexts?: boolean }
 ```
 
-Requires an absolute on-disk source path. It resolves the workspace, lazily
-starts its Agda process, and sends `Cmd_load`. Loading necessarily typechecks in
-Agda. The call establishes this file as the workspace's sole active top-level
-module, increments the revision, and invalidates previous handles even when the
-same path is reloaded.
+Requires an absolute on-disk source path. `workspaceRoot`, when supplied, must
+also be absolute and contain the canonical module path. A request-selected root
+outside the configured allowlist requires the launcher-level
+`--dynamic-workspaces` opt-in. It resolves the workspace, lazily starts its
+Agda process, and sends `Cmd_load`. Loading necessarily typechecks in Agda. The
+call establishes this file as the workspace's sole active top-level module,
+increments the revision, and invalidates previous handles even when the same
+path is reloaded.
 
 The result contains an opaque workspace handle, workspace identity, module
 path, revision, source fingerprint, checked status, normalized diagnostics and
@@ -701,7 +714,11 @@ normally.
 - Source writes require an effective apply policy, a proposal for the active
   file, and an exact matching fingerprint immediately before atomic
   replacement. `apply: false` overrides a mutating server for one request.
-- Canonical real paths are checked against configured workspace roots.
+- Canonical real paths are checked against the selected workspace root.
+- Request-selected roots outside the configured allowlist require the explicit
+  `--dynamic-workspaces` startup flag. This mode may reach any filesystem path
+  accessible to the MCP server process and is intended for trusted local
+  clients.
 - Child processes are spawned without a shell.
 - Interaction strings use a dedicated encoder rather than interpolation.
 - Source fingerprints prevent edits from being proposed against stale text.

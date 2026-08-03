@@ -90,3 +90,18 @@ test("property: module checking rejects contradictory response projections", () 
     { seed: FUZZ_SEED ^ 0x50600004, numRuns: PROPERTY_RUNS },
   );
 });
+
+test("property: load-module accepts a non-empty request-selected workspace root only", () => {
+  fc.assert(
+    fc.property(fc.string(), (workspaceRoot) => {
+      assert.equal(
+        loadModuleInputSchema.safeParse({
+          modulePath: "/workspace/P.agda",
+          workspaceRoot,
+        }).success,
+        workspaceRoot.length > 0,
+      );
+    }),
+    { seed: FUZZ_SEED ^ 0x50600005, numRuns: PROPERTY_RUNS },
+  );
+});

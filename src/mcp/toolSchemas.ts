@@ -98,6 +98,13 @@ export const loadModuleInputSchema = z
     ...callOptionFields,
     ...moduleCheckOptionFields,
     modulePath: z.string().min(1).describe("Absolute path to an .agda, .lagda, or .lagda.md file"),
+    workspaceRoot: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Absolute workspace root containing modulePath; roots outside the configured allowlist require --dynamic-workspaces",
+      ),
   })
   .strict()
   .superRefine(rejectContradictoryModuleOptions);

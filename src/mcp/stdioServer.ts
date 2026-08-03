@@ -98,7 +98,8 @@ function successfulToolResult(value: NormalizedResult<unknown>) {
 
 const RECOVERY_GUIDANCE = Object.freeze({
   INVALID_ARGUMENT: "Correct the tool arguments and retry.",
-  PATH_OUTSIDE_WORKSPACE: "Choose a module inside a configured MCP workspace root.",
+  PATH_OUTSIDE_WORKSPACE:
+    "Choose a module inside an authorized workspace root; configure that root or start the server with --dynamic-workspaces.",
   AGDA_NOT_FOUND: "Install Agda or configure agdaExecutable, then restart the MCP server.",
   NO_ACTIVE_MODULE: "Call agda_load_module before using this workspace operation.",
   UNKNOWN_WORKSPACE: "Call agda_load_module and use the workspace handle it returns.",
@@ -384,10 +385,11 @@ export function createAgdaMcpServer(
   server.registerTool(
     "agda_load_module",
     {
-      description: "Load and typecheck one top-level Agda module from disk",
+      description:
+        "Load and typecheck one top-level Agda module from disk; with --dynamic-workspaces, pass workspaceRoot to select its workspace at runtime",
       inputSchema: loadModuleInputSchema,
     },
-    async ({ modulePath, includeContexts, ...call }, extra) =>
+    async ({ modulePath, workspaceRoot, includeContexts, ...call }, extra) =>
       invoke(
         jobs,
         "agda_load_module",
@@ -395,7 +397,11 @@ export function createAgdaMcpServer(
         extra,
         async (context) =>
           (await serviceProvider()).loadModule(
-            { modulePath, ...(includeContexts === undefined ? {} : { includeContexts }) },
+            {
+              modulePath,
+              ...(workspaceRoot === undefined ? {} : { workspaceRoot }),
+              ...(includeContexts === undefined ? {} : { includeContexts }),
+            },
             context,
           ),
         progressIntervalMs,

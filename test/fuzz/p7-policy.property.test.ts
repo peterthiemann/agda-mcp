@@ -40,6 +40,16 @@ test("property: the source-mutation default round-trips every boolean policy", (
   );
 });
 
+test("property: the dynamic-workspace authorization round-trips every boolean policy", () => {
+  fc.assert(
+    fc.property(fc.boolean(), (allowDynamicWorkspaces) => {
+      const options = parseServerOptions({ allowDynamicWorkspaces });
+      assert.equal(options.allowDynamicWorkspaces, allowDynamicWorkspaces);
+    }),
+    { seed: FUZZ_SEED ^ 0x50700004, numRuns: PROPERTY_RUNS },
+  );
+});
+
 test("property: a bounded queue accepts at most its configured pending count", async () => {
   await fc.assert(
     fc.asyncProperty(fc.integer({ min: 1, max: 16 }), async (maximum) => {

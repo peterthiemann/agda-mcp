@@ -13,16 +13,17 @@ export interface CliIo {
 const HELP_TEXT = `agda-mcp ${VERSION}
 
 Usage:
-  agda-mcp [--apply-edits]
+  agda-mcp [--apply-edits] [--dynamic-workspaces]
   agda-mcp --help
   agda-mcp --version
 
 Agda MCP server for on-disk .agda, .lagda, and .lagda.md modules.
 
 Options:
-      --apply-edits  Apply and typecheck transformations in place by default
-  -h, --help         Show this help text
-  -V, --version      Show the package version
+      --apply-edits         Apply and typecheck transformations in place by default
+      --dynamic-workspaces  Allow load requests to select their workspace root
+  -h, --help                Show this help text
+  -V, --version             Show the package version
 `;
 
 export interface CliDependencies {
@@ -44,15 +45,22 @@ export async function runCli(
     return 0;
   }
 
-  const applyEdits = args.length === 1 && args[0] === "--apply-edits";
-  if (args.length > 0 && !applyEdits) {
-    io.stderr.write(`agda-mcp: unknown arguments: ${args.join(" ")}\n`);
+  const supportedFlags = new Set(["--apply-edits", "--dynamic-workspaces"]);
+  const unknown = args.filter((argument) => !supportedFlags.has(argument));
+  if (unknown.length > 0) {
+    io.stderr.write(`agda-mcp: unknown arguments: ${unknown.join(" ")}\n`);
     io.stderr.write("Run agda-mcp --help for usage.\n");
     return 2;
   }
 
+  const applyEdits = args.includes("--apply-edits");
+  const dynamicWorkspaces = args.includes("--dynamic-workspaces");
+  const serverOptions = {
+    ...(applyEdits ? { applyEditsByDefault: true } : {}),
+    ...(dynamicWorkspaces ? { allowDynamicWorkspaces: true } : {}),
+  };
   await (dependencies.startServer ?? runStdioServer)(
-    applyEdits ? { serverOptions: { applyEditsByDefault: true } } : undefined,
+    Object.keys(serverOptions).length === 0 ? undefined : { serverOptions },
   );
   return 0;
 }

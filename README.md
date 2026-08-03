@@ -29,12 +29,15 @@ not x = ?
 
 An agent can take the file from one hole to two case-specific holes as follows.
 Responses below are abbreviated to their normalized `data`; opaque handles and
-the source fingerprint must be reused exactly as returned.
+the source fingerprint must be reused exactly as returned. This example assumes
+the server was started with `--dynamic-workspaces`, allowing the first call to
+select `/workspace` without per-project server configuration.
 
 ```text
 # 1. Load and typecheck the top-level module.
 agda_load_module({
   "modulePath": "/workspace/Example.agda",
+  "workspaceRoot": "/workspace",
   "includeRaw": false
 })
 → data.workspace = "workspace_…"
@@ -132,24 +135,52 @@ npm exec --yes agda-mcp
 The default command starts an MCP stdio server. Stdout is reserved exclusively
 for MCP framing; operational diagnostics use stderr.
 
-A generic MCP client configuration looks like this:
+A generic model-selected workspace configuration looks like this:
 
 ```json
 {
   "mcpServers": {
     "agda": {
       "command": "npx",
-      "args": ["-y", "agda-mcp"],
-      "env": {
-        "AGDA_MCP_OPTIONS": "{\"workspaceRoots\":[\"/absolute/path/to/project\"]}"
-      }
+      "args": ["-y", "agda-mcp", "--dynamic-workspaces"]
     }
   }
 }
 ```
 
-If the client publishes filesystem roots through MCP, `workspaceRoots` may be
-omitted. Otherwise the server falls back to its working directory.
+The server is installed once. The model then selects an active workspace on
+its first load instead of requiring a separate client entry for each project:
+
+```text
+agda_load_module({
+  "modulePath": "/absolute/path/to/project/Main.agda",
+  "workspaceRoot": "/absolute/path/to/project"
+})
+```
+
+Both paths must exist and be absolute. The server resolves symlinks, requires
+the module to remain within the selected root, discovers the nearest
+`.agda-lib`, and lazily starts or reuses that project's long-lived Agda
+process. `agda_server_info` reports this mode as
+`capabilities.workspaceSelection: "request"`.
+
+`--dynamic-workspaces` deliberately broadens the directories that MCP calls
+can target to anything accessible to the server process. Only enable it for a
+trusted local model/client. Without the flag, a supplied `workspaceRoot` must
+exactly match a configured root. The server otherwise uses MCP filesystem
+roots when the client publishes them, falling back to its working directory.
+The restricted configuration remains available when a fixed allowlist is
+preferred:
+
+```json
+{
+  "command": "npx",
+  "args": ["-y", "agda-mcp"],
+  "env": {
+    "AGDA_MCP_OPTIONS": "{\"workspaceRoots\":[\"/absolute/path/to/project\"]}"
+  }
+}
+```
 
 ### Enable in-place transformations
 
@@ -171,6 +202,12 @@ For an MCP client configuration, add the flag to the command arguments:
 }
 ```
 
+It composes with runtime workspace selection:
+
+```sh
+npx -y agda-mcp --dynamic-workspaces --apply-edits
+```
+
 Clients that configure the server through the environment can equivalently set
 `"applyEditsByDefault": true` inside `AGDA_MCP_OPTIONS`. The command-line flag
 wins over an environment value. `agda_server_info` reports the effective mode
@@ -189,6 +226,7 @@ Unknown fields and invalid limits are rejected before an Agda process starts.
 | --- | --- | --- |
 | `agdaExecutable` | Executable name or path resolved at server startup | `agda` |
 | `workspaceRoots` | Allowed absolute roots for direct module targets | MCP roots or cwd |
+| `allowDynamicWorkspaces` | Allow a load request to select a root outside `workspaceRoots` | `false` |
 | `includePaths` | Extra project-relative include paths | `[]` |
 | `libraries` | Additional registered Agda libraries | `[]` |
 | `libraryFile` | Alternate Agda libraries file | Agda default |
@@ -288,15 +326,16 @@ operation categories. Specific timeout fields override it.
 The nearest ancestor `.agda-lib` inside the selected workspace supplies
 project includes, dependencies, and flags. Configuration is merged
 deterministically with global and workspace overrides. Direct source targets
-must remain inside a configured workspace after canonical path resolution;
-registered imports may live elsewhere.
+must remain inside the selected workspace after canonical path resolution;
+without `--dynamic-workspaces`, that selected root must also be configured.
+Registered imports may live elsewhere.
 
 ## Tools
 
 | Tool | Purpose |
 | --- | --- |
 | `agda_server_info` | Report Agda discovery, compatibility, capabilities, and sessions |
-| `agda_load_module` | Load/typecheck one top-level module and establish a workspace |
+| `agda_load_module` | Select a workspace and load/typecheck one top-level module |
 | `agda_typecheck` | Reload/typecheck the active workspace module |
 | `agda_retrieve_goals` | Retrieve current visible goals and opaque handles |
 | `agda_retrieve_context` | Retrieve a goal type, local context, and boundary |

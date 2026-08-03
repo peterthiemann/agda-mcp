@@ -106,7 +106,7 @@ function selectWorkspace(modulePath: string, roots: readonly string[]): string {
   containing.sort((left, right) => right.length - left.length || left.localeCompare(right));
   const selected = containing[0];
   if (selected === undefined) {
-    throw new ApplicationError("PATH_OUTSIDE_WORKSPACE", `Module is outside configured workspace roots: ${modulePath}`, {
+    throw new ApplicationError("PATH_OUTSIDE_WORKSPACE", `Module is outside the selected workspace roots: ${modulePath}`, {
       details: { modulePath, workspaceRoots: roots },
     });
   }
@@ -135,12 +135,13 @@ async function selectWorkspaceOverride(
   overrides: readonly ResolvedWorkspaceOverrideOptions[],
   workspaceRoots: readonly string[],
   workspaceRoot: string,
+  allowDynamicWorkspaces: boolean,
 ): Promise<ResolvedWorkspaceOverrideOptions | undefined> {
   let selected: ResolvedWorkspaceOverrideOptions | undefined;
   const seenRoots = new Set<string>();
   for (const override of overrides) {
     const canonicalRoot = await canonicalDirectory(override.root, "Workspace override root");
-    if (!workspaceRoots.includes(canonicalRoot)) {
+    if (!allowDynamicWorkspaces && !workspaceRoots.includes(canonicalRoot)) {
       invalid(`Workspace override root is not a configured workspace: ${override.root}`, {
         root: override.root,
       });
@@ -170,11 +171,42 @@ export async function discoverModulePlan(
   modulePath: string,
   options: ResolvedServerOptions,
   installation: AgdaInstallation,
+  requestedWorkspaceRoot?: string,
 ): Promise<ModuleDiscoveryPlan> {
   const canonicalPath = await canonicalModule(modulePath);
   const sourceFormat = requireSourceFormat(canonicalPath);
-  const workspaceRoots = await canonicalWorkspaceRoots(options.workspaceRoots);
-  const workspaceRoot = selectWorkspace(canonicalPath, workspaceRoots);
+  // Transport adapters normally contribute at least cwd as a configured root.
+  // Keep the domain API usable without one when the caller explicitly opts in
+  // to request-selected workspaces.
+  const workspaceRoots =
+    options.workspaceRoots.length === 0
+      ? []
+      : await canonicalWorkspaceRoots(options.workspaceRoots);
+  const requestedRoot =
+    requestedWorkspaceRoot === undefined
+      ? undefined
+      : await canonicalDirectory(requestedWorkspaceRoot, "workspaceRoot");
+  if (
+    requestedRoot !== undefined &&
+    !options.allowDynamicWorkspaces &&
+    !workspaceRoots.includes(requestedRoot)
+  ) {
+    throw new ApplicationError(
+      "PATH_OUTSIDE_WORKSPACE",
+      `Requested workspace root is not configured: ${requestedWorkspaceRoot}`,
+      {
+        details: {
+          requestedWorkspaceRoot,
+          workspaceRoots,
+          allowDynamicWorkspaces: false,
+        },
+      },
+    );
+  }
+  const workspaceRoot = selectWorkspace(
+    canonicalPath,
+    requestedRoot === undefined ? workspaceRoots : [requestedRoot],
+  );
   const projectFilePath = await findNearestAgdaLibrary(canonicalPath, workspaceRoot);
   const projectFile =
     projectFilePath === undefined ? undefined : await readAgdaLibraryFile(projectFilePath);
@@ -183,6 +215,7 @@ export async function discoverModulePlan(
     options.workspaceOverrides,
     workspaceRoots,
     workspaceRoot,
+    options.allowDynamicWorkspaces,
   );
 
   const includePaths = unique([

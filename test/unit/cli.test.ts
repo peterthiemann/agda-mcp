@@ -23,6 +23,7 @@ test("--help describes the supported source formats", async () => {
   assert.equal(await runCli(["--help"], output.io), 0);
   assert.match(output.stdout.join(""), /\.agda, \.lagda, and \.lagda\.md/);
   assert.match(output.stdout.join(""), /--apply-edits/);
+  assert.match(output.stdout.join(""), /--dynamic-workspaces/);
   assert.deepEqual(output.stderr, []);
 });
 
@@ -40,6 +41,43 @@ test("--apply-edits enables the server-wide guarded mutation default", async () 
   assert.deepEqual(received, { serverOptions: { applyEditsByDefault: true } });
   assert.deepEqual(output.stdout, []);
   assert.deepEqual(output.stderr, []);
+});
+
+test("--dynamic-workspaces enables request-selected workspace roots", async () => {
+  const output = captureIo();
+  let received: StdioServerOptions | undefined;
+  assert.equal(
+    await runCli(["--dynamic-workspaces"], output.io, {
+      startServer: async (options) => {
+        received = options;
+      },
+    }),
+    0,
+  );
+  assert.deepEqual(received, { serverOptions: { allowDynamicWorkspaces: true } });
+  assert.deepEqual(output.stdout, []);
+  assert.deepEqual(output.stderr, []);
+});
+
+test("workspace selection and mutation flags compose in either order", async () => {
+  for (const args of [
+    ["--dynamic-workspaces", "--apply-edits"],
+    ["--apply-edits", "--dynamic-workspaces"],
+  ]) {
+    const output = captureIo();
+    let received: StdioServerOptions | undefined;
+    assert.equal(
+      await runCli(args, output.io, {
+        startServer: async (options) => {
+          received = options;
+        },
+      }),
+      0,
+    );
+    assert.deepEqual(received, {
+      serverOptions: { applyEditsByDefault: true, allowDynamicWorkspaces: true },
+    });
+  }
 });
 
 test("--version prints the package version", async () => {

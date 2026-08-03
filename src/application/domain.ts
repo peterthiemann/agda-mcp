@@ -117,6 +117,7 @@ export interface ServerInfo {
     readonly sourceFormats: readonly SourceFormat[];
     readonly mutatesFiles: "opt-in";
     readonly transformationDefault: "preview" | "apply";
+    readonly workspaceSelection: "configured" | "request";
     readonly metavariableScope: "interaction-backend";
   };
 }
@@ -223,6 +224,7 @@ export type NormalizationMode =
 
 export interface LoadModuleRequest {
   readonly modulePath: string;
+  readonly workspaceRoot?: string;
   readonly includeContexts?: boolean;
 }
 

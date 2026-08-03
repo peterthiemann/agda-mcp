@@ -32,6 +32,9 @@ export const DEFAULT_INCLUDE_RAW = false;
 // --apply-edits flag or initialization policy can switch the server to guarded
 // in-place application while each request retains an explicit override.
 export const DEFAULT_APPLY_EDITS_BY_DEFAULT = false;
+// Request-selected workspace roots broaden the server's filesystem reach and
+// therefore require an explicit launcher-level opt-in.
+export const DEFAULT_ALLOW_DYNAMIC_WORKSPACES = false;
 
 export const ASYNC_MODES = Object.freeze(["auto", "never", "always"] as const);
 export type AsyncMode = (typeof ASYNC_MODES)[number];
@@ -47,6 +50,7 @@ export interface WorkspaceOverrideOptions {
 export interface ServerOptions {
   readonly agdaExecutable?: string;
   readonly workspaceRoots?: readonly string[];
+  readonly allowDynamicWorkspaces?: boolean;
   readonly includePaths?: readonly string[];
   readonly libraries?: readonly string[];
   readonly libraryFile?: string;
@@ -87,6 +91,7 @@ export interface ResolvedWorkspaceOverrideOptions {
 export interface ResolvedServerOptions {
   readonly agdaExecutable: string;
   readonly workspaceRoots: readonly string[];
+  readonly allowDynamicWorkspaces: boolean;
   readonly includePaths: readonly string[];
   readonly libraries: readonly string[];
   readonly libraryFile?: string;
@@ -119,6 +124,7 @@ export interface ResolvedServerOptions {
 const SERVER_OPTION_KEYS = new Set([
   "agdaExecutable",
   "workspaceRoots",
+  "allowDynamicWorkspaces",
   "includePaths",
   "libraries",
   "libraryFile",
@@ -345,6 +351,12 @@ export function parseServerOptions(input: unknown = {}): ResolvedServerOptions {
   const result: ResolvedServerOptions = {
     agdaExecutable,
     workspaceRoots: stringArray(input, "workspaceRoots", "options"),
+    allowDynamicWorkspaces: booleanValue(
+      input,
+      "allowDynamicWorkspaces",
+      DEFAULT_ALLOW_DYNAMIC_WORKSPACES,
+      "options",
+    ),
     includePaths: stringArray(input, "includePaths", "options"),
     libraries: stringArray(input, "libraries", "options"),
     additionalFlags,

@@ -169,7 +169,7 @@ test("the compiled CLI serves the full tool surface over clean stdio framing", a
   }
 });
 
-test("the compiled --apply-edits server mutates a source when apply is omitted", async (context) => {
+test("the compiled dynamic mutation server opens a selected workspace and applies edits", async (context) => {
   const fixtureRoot = path.resolve("test/fixtures/agda-2.8.0");
   const directory = await mkdtemp(path.join(tmpdir(), "agda-mcp-stdio-write-"));
   const modulePath = path.join(directory, "CaseSplit.agda");
@@ -195,15 +195,19 @@ test("the compiled --apply-edits server mutates a source when apply is omitted",
 
   const transport = new StdioClientTransport({
     command: process.execPath,
-    args: [path.resolve(".test-dist/src/index.js"), "--apply-edits"],
+    args: [
+      path.resolve(".test-dist/src/index.js"),
+      "--dynamic-workspaces",
+      "--apply-edits",
+    ],
     cwd: process.cwd(),
     stderr: "pipe",
     env: {
       ...getDefaultEnvironment(),
       AGDA_MCP_OPTIONS: JSON.stringify({
         agdaExecutable: installation.executable,
-        workspaceRoots: [directory],
         commandTimeoutMs: 120_000,
+        allowDynamicWorkspaces: false,
         applyEditsByDefault: false,
       }),
     },
@@ -218,9 +222,15 @@ test("the compiled --apply-edits server mutates a source when apply is omitted",
       } | undefined)?.data?.capabilities?.transformationDefault,
       "apply",
     );
+    assert.equal(
+      (info.structuredContent as {
+        data?: { capabilities?: { workspaceSelection?: string } };
+      } | undefined)?.data?.capabilities?.workspaceSelection,
+      "request",
+    );
     const loaded = await client.callTool({
       name: "agda_load_module",
-      arguments: { modulePath },
+      arguments: { modulePath, workspaceRoot: directory },
     });
     const goal = (loaded.structuredContent as {
       data?: { goals?: Array<{ handle?: string }> };

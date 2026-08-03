@@ -31,13 +31,14 @@ function ok(data: unknown): NormalizedResult<unknown> {
   return Object.freeze({ data, warnings: Object.freeze([]), raw: EMPTY_RAW });
 }
 
-function recordingService(calls: string[]): AgdaService {
+function recordingService(calls: string[], loadRequests: unknown[] = []): AgdaService {
   return new Proxy({} as AgdaService, {
     get(_target, property) {
       if (property === "then") return undefined;
       if (property === "shutdown") return async () => undefined;
       return async (...args: unknown[]) => {
         calls.push(String(property));
+        if (property === "loadModule") loadRequests.push(args[0]);
         return ok({ operation: property, args });
       };
     },
@@ -46,7 +47,8 @@ function recordingService(calls: string[]): AgdaService {
 
 test("all twelve strict schemas dispatch to their transport-independent service operations", async () => {
   const calls: string[] = [];
-  const server = createAgdaMcpServer(async () => recordingService(calls));
+  const loadRequests: unknown[] = [];
+  const server = createAgdaMcpServer(async () => recordingService(calls, loadRequests));
   const client = new Client({ name: "agda-mcp-p6", version: "1" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   try {
@@ -54,7 +56,14 @@ test("all twelve strict schemas dispatch to their transport-independent service 
     await client.connect(clientTransport);
     const invocations = [
       ["agda_server_info", {}],
-      ["agda_load_module", { modulePath: "/workspace/M.agda", includeContexts: true }],
+      [
+        "agda_load_module",
+        {
+          modulePath: "/workspace/M.agda",
+          workspaceRoot: "/workspace",
+          includeContexts: true,
+        },
+      ],
       ["agda_typecheck", { workspace: "workspace", includeContexts: true }],
       ["agda_retrieve_goals", { workspace: "workspace" }],
       ["agda_retrieve_context", { goal: "goal", rewrite: "simplified" }],
@@ -90,6 +99,13 @@ test("all twelve strict schemas dispatch to their transport-independent service 
       "normalizeExpression",
       "inferType",
       "queryMetavariables",
+    ]);
+    assert.deepEqual(loadRequests, [
+      {
+        modulePath: "/workspace/M.agda",
+        workspaceRoot: "/workspace",
+        includeContexts: true,
+      },
     ]);
 
     const invalid = await client.callTool({
