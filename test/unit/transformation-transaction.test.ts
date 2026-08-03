@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { parseServerOptions } from "../../src/application/config.js";
+import { parseServerOptions, type ServerOptions } from "../../src/application/config.js";
 import { ApplicationError } from "../../src/application/errors.js";
 import { AgdaApplicationService } from "../../src/application/service.js";
 import type { AgdaInstallation } from "../../src/discovery/agdaInstallation.js";
@@ -23,12 +23,12 @@ const INSTALLATION: AgdaInstallation = Object.freeze({
   warnings: Object.freeze([]),
 });
 
-async function fixture(fake: string = FAKE_AGDA) {
+async function fixture(fake: string = FAKE_AGDA, options: ServerOptions = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), "agda-mcp-preview-"));
   const modulePath = path.join(directory, "Tiny.agda");
   await writeFile(modulePath, await readFile("test/fixtures/agda-2.8.0/Tiny.agda"));
   const service = await AgdaApplicationService.create(
-    parseServerOptions({ workspaceRoots: [directory], commandTimeoutMs: 2_000 }),
+    parseServerOptions({ workspaceRoots: [directory], commandTimeoutMs: 2_000, ...options }),
     {
       installation: INSTALLATION,
       processHostFactory: (options) =>
@@ -78,6 +78,38 @@ test("transformation previews preserve bytes, restore state, and rotate handles"
     const split = await testFixture.service.caseSplit({ goal: caseGoal as string, variables: "x" });
     assert.equal(split.data.edits[0]?.replacement, "id true = false\nid false = true");
     assert.deepEqual(await readFile(testFixture.modulePath), before);
+  } finally {
+    await testFixture.service.shutdown();
+    await rm(testFixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("server mutation mode applies by default while apply:false still previews", async () => {
+  const testFixture = await fixture(FAKE_AGDA, { applyEditsByDefault: true });
+  try {
+    const before = await readFile(testFixture.modulePath);
+    const info = await testFixture.service.serverInfo();
+    assert.equal(info.data.capabilities.transformationDefault, "apply");
+
+    const loaded = await testFixture.service.loadModule({ modulePath: testFixture.modulePath });
+    const goal = loaded.data.goals[0]?.handle;
+    assert.notEqual(goal, undefined);
+    const preview = await testFixture.service.refine({
+      goal: goal as string,
+      expression: "x",
+      apply: false,
+    });
+    assert.equal(preview.data.applied, false);
+    assert.deepEqual(await readFile(testFixture.modulePath), before);
+
+    const freshGoal = preview.data.goals[0]?.handle;
+    assert.notEqual(freshGoal, undefined);
+    const applied = await testFixture.service.caseSplit({
+      goal: freshGoal as string,
+      variables: "x",
+    });
+    assert.equal(applied.data.applied, true);
+    assert.match(await readFile(testFixture.modulePath, "utf8"), /id true = false/u);
   } finally {
     await testFixture.service.shutdown();
     await rm(testFixture.directory, { recursive: true, force: true });

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
@@ -165,5 +166,84 @@ test("the compiled CLI serves the full tool surface over clean stdio framing", a
     assert.equal(Buffer.concat(stderr).toString("utf8"), "");
   } finally {
     await client.close();
+  }
+});
+
+test("the compiled --apply-edits server mutates a source when apply is omitted", async (context) => {
+  const fixtureRoot = path.resolve("test/fixtures/agda-2.8.0");
+  const directory = await mkdtemp(path.join(tmpdir(), "agda-mcp-stdio-write-"));
+  const modulePath = path.join(directory, "CaseSplit.agda");
+  await writeFile(
+    modulePath,
+    await readFile(path.join(fixtureRoot, "formats", "CaseSplit.agda")),
+  );
+  const before = await readFile(modulePath);
+  let installation;
+  try {
+    installation = await discoverAgdaInstallation(parseServerOptions());
+  } catch (error: unknown) {
+    const code = error instanceof ApplicationError ? error.code : "unknown";
+    await rm(directory, { recursive: true, force: true });
+    context.skip(`Agda is unavailable (${code})`);
+    return;
+  }
+  if (installation.version !== "2.8.0") {
+    await rm(directory, { recursive: true, force: true });
+    context.skip(`Agda ${installation.version} is installed; live baseline requires 2.8.0`);
+    return;
+  }
+
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [path.resolve(".test-dist/src/index.js"), "--apply-edits"],
+    cwd: process.cwd(),
+    stderr: "pipe",
+    env: {
+      ...getDefaultEnvironment(),
+      AGDA_MCP_OPTIONS: JSON.stringify({
+        agdaExecutable: installation.executable,
+        workspaceRoots: [directory],
+        commandTimeoutMs: 120_000,
+        applyEditsByDefault: false,
+      }),
+    },
+  });
+  const client = new Client({ name: "agda-mcp-stdio-write-test", version: "1.0.0" });
+  try {
+    await client.connect(transport);
+    const info = await client.callTool({ name: "agda_server_info", arguments: {} });
+    assert.equal(
+      (info.structuredContent as {
+        data?: { capabilities?: { transformationDefault?: string } };
+      } | undefined)?.data?.capabilities?.transformationDefault,
+      "apply",
+    );
+    const loaded = await client.callTool({
+      name: "agda_load_module",
+      arguments: { modulePath },
+    });
+    const goal = (loaded.structuredContent as {
+      data?: { goals?: Array<{ handle?: string }> };
+    } | undefined)?.data?.goals?.[0]?.handle;
+    assert.equal(typeof goal, "string");
+    const split = await client.callTool({
+      name: "agda_case_split",
+      arguments: { goal, variables: "x" },
+    });
+    assert.equal(split.isError, undefined);
+    assert.equal(
+      (split.structuredContent as { data?: { applied?: boolean; checked?: boolean } } | undefined)
+        ?.data?.applied,
+      true,
+    );
+    assert.equal(
+      (split.structuredContent as { data?: { applied?: boolean; checked?: boolean } } | undefined)
+        ?.data?.checked,
+      true,
+    );
+    assert.notDeepEqual(await readFile(modulePath), before);
+  } finally {
+    await client.close();
+    await rm(directory, { recursive: true, force: true });
   }
 });

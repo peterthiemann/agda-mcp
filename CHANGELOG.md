@@ -3,6 +3,23 @@
 This file records notable changes to `agda-mcp`, with the most recent release
 first.
 
+## [Unreleased]
+
+### Added
+
+- Added the `--apply-edits` startup flag and matching
+  `applyEditsByDefault` initialization option. When enabled, case split,
+  refine, and auto atomically update and typecheck the active source without a
+  per-call `apply: true`; `apply: false` retains an explicit preview escape
+  hatch.
+- Added `capabilities.transformationDefault` to `agda_server_info` so clients
+  can discover whether omitted transformation policy means preview or apply.
+
+### Changed
+
+- Extended unit, property-based, and live-Agda coverage for server-wide
+  mutation policy, per-call overrides, and all supported literate formats.
+
 ## [0.3.0] - 2026-07-21
 
 ### Added

@@ -167,7 +167,7 @@ export const caseSplitInputSchema = z
     apply: z
       .boolean()
       .optional()
-      .describe("Guardedly write the proposal and typecheck it in one transaction"),
+      .describe("Override the server policy: true applies/typechecks; false previews"),
   })
   .strict();
 
@@ -180,7 +180,7 @@ export const refineInputSchema = z
     apply: z
       .boolean()
       .optional()
-      .describe("Guardedly write the proposal and typecheck it in one transaction"),
+      .describe("Override the server policy: true applies/typechecks; false previews"),
   })
   .strict();
 
@@ -192,7 +192,7 @@ export const autoInputSchema = z
     apply: z
       .boolean()
       .optional()
-      .describe("Guardedly write the proposal and typecheck it in one transaction"),
+      .describe("Override the server policy: true applies/typechecks; false previews"),
   })
   .strict();
 

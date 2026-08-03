@@ -28,7 +28,7 @@ fingerprint-guarded atomic write followed by an immediate typecheck.
 | Loaded state | One top-level module per workspace |
 | Concurrency | Serialized within a workspace; independent across workspaces |
 | Source model | On-disk `.agda`, `.lagda`, and `.lagda.md` files |
-| Transformations | Preview by default; guarded write and typecheck with `apply: true` |
+| Transformations | Preview by default; `--apply-edits` enables guarded in-place application |
 | Preview recovery | Reload the unchanged module after each preview |
 | Goal selection | Opaque goal handles only |
 | Public results | Normalized objects plus bounded `raw` metadata; native events on request |
@@ -154,6 +154,7 @@ interface ServerOptions {
   stderrReturnLimitBytes?: number;   // default: 32768 (32 KiB)
   maxCommandOutputBytes?: number;    // default: 16777216 (16 MiB)
   allowAgdaExec?: boolean;       // default: false
+  applyEditsByDefault?: boolean; // default: false; CLI: --apply-edits
 }
 ```
 
@@ -599,7 +600,9 @@ This limitation is reported in server capabilities.
 
 `case_split`, `refine`, and `auto` are treated as state-mutating backend
 commands even if a particular Agda version appears not to mutate state for one
-of them. Files remain unchanged unless the request contains `apply: true`.
+of them. The effective policy is `request.apply ?? applyEditsByDefault`.
+`--apply-edits` sets the server default to true; the default startup policy is
+false for backward compatibility.
 
 Every transformation executes as a transaction under the workspace queue:
 
@@ -638,16 +641,17 @@ This model intentionally incurs one reload/typecheck and invalidates goal
 handles after each preview. It keeps the primary process aligned with disk and
 avoids temporary shadow files or secondary Agda processes.
 
-With `apply: true`, steps 7–10 instead atomically replace the active source
-after one final fingerprint check, load/typecheck the edited module, and return
-the verdict, diagnostics, new fingerprint, and fresh handles. The operation
-and typecheck transcripts are kept separately. If the canonical load fails,
-the server attempts an atomic rollback only while the edited fingerprint still
-matches. A detected concurrent external change prevents application or
-rollback. The server reports file-mutation capability as `"opt-in"`. A
-completed Agda load with type errors is returned as `checked: false` and keeps
-the applied edit; rollback is reserved for process, protocol, or other failures
-that prevent a canonical result.
+With an effective apply policy, steps 7–10 instead atomically replace the
+active source after one final fingerprint check, load/typecheck the edited
+module, and return the verdict, diagnostics, new fingerprint, and fresh
+handles. The operation and typecheck transcripts are kept separately. If the
+canonical load fails, the server attempts an atomic rollback only while the
+edited fingerprint still matches. A detected concurrent external change
+prevents application or rollback. The server reports file-mutation capability
+as `"opt-in"` and its effective default as `transformationDefault`. A completed
+Agda load with type errors is returned as `checked: false` and keeps the applied
+edit; rollback is reserved for process, protocol, or other failures that
+prevent a canonical result.
 
 ## 12. Concurrency, cancellation, and recovery
 
@@ -694,8 +698,9 @@ normally.
 
 ## 14. Security and safety
 
-- Source writes require `apply: true`, a proposal for the active file, and an
-  exact matching fingerprint immediately before atomic replacement.
+- Source writes require an effective apply policy, a proposal for the active
+  file, and an exact matching fingerprint immediately before atomic
+  replacement. `apply: false` overrides a mutating server for one request.
 - Canonical real paths are checked against configured workspace roots.
 - Child processes are spawned without a shell.
 - Interaction strings use a dedicated encoder rather than interpolation.

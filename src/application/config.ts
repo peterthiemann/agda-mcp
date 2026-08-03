@@ -28,6 +28,10 @@ export const DEFAULT_PROGRESS_INTERVAL_MS = 2_000;
 // fast default: large raw transcripts otherwise dominate MCP serialization and
 // agent context even when the caller never inspects them.
 export const DEFAULT_INCLUDE_RAW = false;
+// Transformation previews remain the backward-compatible default. The CLI
+// --apply-edits flag or initialization policy can switch the server to guarded
+// in-place application while each request retains an explicit override.
+export const DEFAULT_APPLY_EDITS_BY_DEFAULT = false;
 
 export const ASYNC_MODES = Object.freeze(["auto", "never", "always"] as const);
 export type AsyncMode = (typeof ASYNC_MODES)[number];
@@ -69,6 +73,7 @@ export interface ServerOptions {
   readonly progressIntervalMs?: number;
   readonly includeRawByDefault?: boolean;
   readonly maxBatchGoals?: number;
+  readonly applyEditsByDefault?: boolean;
 }
 
 export interface ResolvedWorkspaceOverrideOptions {
@@ -108,6 +113,7 @@ export interface ResolvedServerOptions {
   readonly progressIntervalMs: number;
   readonly includeRawByDefault: boolean;
   readonly maxBatchGoals: number;
+  readonly applyEditsByDefault: boolean;
 }
 
 const SERVER_OPTION_KEYS = new Set([
@@ -139,6 +145,7 @@ const SERVER_OPTION_KEYS = new Set([
   "progressIntervalMs",
   "includeRawByDefault",
   "maxBatchGoals",
+  "applyEditsByDefault",
 ]);
 
 const WORKSPACE_OPTION_KEYS = new Set([
@@ -393,6 +400,12 @@ export function parseServerOptions(input: unknown = {}): ResolvedServerOptions {
     progressIntervalMs: positiveInteger(input, "progressIntervalMs", DEFAULT_PROGRESS_INTERVAL_MS, "options"),
     includeRawByDefault: booleanValue(input, "includeRawByDefault", DEFAULT_INCLUDE_RAW, "options"),
     maxBatchGoals: positiveInteger(input, "maxBatchGoals", DEFAULT_MAX_BATCH_GOALS, "options"),
+    applyEditsByDefault: booleanValue(
+      input,
+      "applyEditsByDefault",
+      DEFAULT_APPLY_EDITS_BY_DEFAULT,
+      "options",
+    ),
     ...(libraryFile === undefined ? {} : { libraryFile }),
   };
   return Object.freeze(result);

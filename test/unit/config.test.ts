@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  DEFAULT_APPLY_EDITS_BY_DEFAULT,
   DEFAULT_ASYNC_MODE,
   DEFAULT_COMMAND_TIMEOUT_MS,
   DEFAULT_DEFER_AFTER_MS,
@@ -45,6 +46,8 @@ test("server options apply immutable security-conscious defaults", () => {
   assert.equal(options.deferAfterMs, 1_000);
   assert.equal(options.includeRawByDefault, DEFAULT_INCLUDE_RAW);
   assert.equal(options.includeRawByDefault, false);
+  assert.equal(options.applyEditsByDefault, DEFAULT_APPLY_EDITS_BY_DEFAULT);
+  assert.equal(options.applyEditsByDefault, false);
   assert.equal(Object.isFrozen(options), true);
   assert.equal(Object.isFrozen(options.includePaths), true);
 });
@@ -54,6 +57,7 @@ test("server options parse workspace-specific overrides", () => {
     workspaceRoots: ["/workspace"],
     includePaths: ["global"],
     allowAgdaExec: true,
+    applyEditsByDefault: true,
     additionalFlags: ["--allow-exec"],
     workspaceOverrides: [
       {
@@ -67,6 +71,7 @@ test("server options parse workspace-specific overrides", () => {
   });
 
   assert.equal(options.allowAgdaExec, true);
+  assert.equal(options.applyEditsByDefault, true);
   assert.deepEqual(options.workspaceOverrides[0], {
     root: "/workspace",
     includePaths: ["local"],
@@ -103,6 +108,7 @@ test("server options reject malformed and inconsistent limits", () => {
   assert.throws(() => parseServerOptions({ loadTimeoutMs: 0 }), isInvalidArgument);
   assert.throws(() => parseServerOptions({ maxQueuedCommands: 0 }), isInvalidArgument);
   assert.throws(() => parseServerOptions({ includePaths: [""] }), isInvalidArgument);
+  assert.throws(() => parseServerOptions({ applyEditsByDefault: "yes" }), isInvalidArgument);
   assert.throws(
     () => parseServerOptions({ rawResponseLimitBytes: 2, maxCommandOutputBytes: 1 }),
     isInvalidArgument,

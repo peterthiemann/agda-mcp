@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { parseServerOptions } from "../../src/application/config.js";
+import { parseServerOptions, type ServerOptions } from "../../src/application/config.js";
 import { ApplicationError } from "../../src/application/errors.js";
 import { AgdaApplicationService } from "../../src/application/service.js";
 import type {
@@ -19,8 +19,16 @@ import { applyTextEdit } from "../../src/normalization/editPlanner.js";
 
 const FIXTURE_ROOT = path.resolve("test/fixtures/agda-2.8.0/formats");
 
-async function liveService(context: test.TestContext, workspaceRoot: string) {
-  const options = parseServerOptions({ workspaceRoots: [workspaceRoot], commandTimeoutMs: 120_000 });
+async function liveService(
+  context: test.TestContext,
+  workspaceRoot: string,
+  overrides: ServerOptions = {},
+) {
+  const options = parseServerOptions({
+    workspaceRoots: [workspaceRoot],
+    commandTimeoutMs: 120_000,
+    ...overrides,
+  });
   try {
     const installation = await discoverAgdaInstallation(options);
     if (installation.version !== "2.8.0") {
@@ -129,9 +137,9 @@ test("live case split previews preserve all formats and produce typecheckable cl
   }
 });
 
-test("live direct transformations apply and typecheck all source formats in one call", async (context) => {
+test("live mutation mode applies and typechecks all source formats in one call", async (context) => {
   const directory = await mkdtemp(path.join(tmpdir(), "agda-mcp-p5-direct-"));
-  const service = await liveService(context, directory);
+  const service = await liveService(context, directory, { applyEditsByDefault: true });
   if (service === undefined) {
     await rm(directory, { recursive: true, force: true });
     return;
@@ -154,10 +162,10 @@ test("live direct transformations apply and typecheck all source formats in one 
       const goal = loaded.data.goals[0]?.handle;
       assert.notEqual(goal, undefined, name);
       const transformed: NormalizedResult<EditPreviewResult> = operation === "refine"
-        ? await service.refine({ goal: goal as string, expression: "x", apply: true })
+        ? await service.refine({ goal: goal as string, expression: "x" })
         : operation === "auto"
-          ? await service.auto({ goal: goal as string, apply: true })
-          : await service.caseSplit({ goal: goal as string, variables: "x", apply: true });
+          ? await service.auto({ goal: goal as string })
+          : await service.caseSplit({ goal: goal as string, variables: "x" });
       const after = await readFile(modulePath, "utf8");
       assert.notEqual(after, before, `${operation} did not write ${name}`);
       assert.equal(transformed.data.applied, true, name);

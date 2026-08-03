@@ -116,6 +116,7 @@ export interface ServerInfo {
   readonly capabilities: {
     readonly sourceFormats: readonly SourceFormat[];
     readonly mutatesFiles: "opt-in";
+    readonly transformationDefault: "preview" | "apply";
     readonly metavariableScope: "interaction-backend";
   };
 }

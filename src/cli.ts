@@ -1,5 +1,5 @@
 import { VERSION } from "./version.js";
-import { runStdioServer } from "./mcp/stdioServer.js";
+import { runStdioServer, type StdioServerOptions } from "./mcp/stdioServer.js";
 
 export interface CliWriter {
   write(chunk: string): void;
@@ -13,19 +13,20 @@ export interface CliIo {
 const HELP_TEXT = `agda-mcp ${VERSION}
 
 Usage:
-  agda-mcp
+  agda-mcp [--apply-edits]
   agda-mcp --help
   agda-mcp --version
 
 Agda MCP server for on-disk .agda, .lagda, and .lagda.md modules.
 
 Options:
-  -h, --help     Show this help text
-  -V, --version  Show the package version
+      --apply-edits  Apply and typecheck transformations in place by default
+  -h, --help         Show this help text
+  -V, --version      Show the package version
 `;
 
 export interface CliDependencies {
-  readonly startServer?: () => Promise<void>;
+  readonly startServer?: (options?: StdioServerOptions) => Promise<void>;
 }
 
 export async function runCli(
@@ -43,12 +44,15 @@ export async function runCli(
     return 0;
   }
 
-  if (args.length > 0) {
+  const applyEdits = args.length === 1 && args[0] === "--apply-edits";
+  if (args.length > 0 && !applyEdits) {
     io.stderr.write(`agda-mcp: unknown arguments: ${args.join(" ")}\n`);
     io.stderr.write("Run agda-mcp --help for usage.\n");
     return 2;
   }
 
-  await (dependencies.startServer ?? runStdioServer)();
+  await (dependencies.startServer ?? runStdioServer)(
+    applyEdits ? { serverOptions: { applyEditsByDefault: true } } : undefined,
+  );
   return 0;
 }

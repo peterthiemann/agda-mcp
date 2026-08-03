@@ -269,6 +269,7 @@ export class AgdaApplicationService implements AgdaService {
         capabilities: Object.freeze({
           sourceFormats: Object.freeze(["agda", "lagda", "lagda.md"] as const),
           mutatesFiles: "opt-in",
+          transformationDefault: this.#options.applyEditsByDefault ? "apply" : "preview",
           metavariableScope: "interaction-backend",
         }),
       }),
@@ -485,7 +486,7 @@ export class AgdaApplicationService implements AgdaService {
       }),
       planCaseSplitEdit,
       signalOptions(context),
-      request.apply === true,
+      request.apply ?? this.#options.applyEditsByDefault,
     );
     return transformationResult(
       transaction.proposal.edits,
@@ -520,7 +521,7 @@ export class AgdaApplicationService implements AgdaService {
       (events, planningContext) =>
         planRefineEdit(events, planningContext, request.expression),
       signalOptions(context),
-      request.apply === true,
+      request.apply ?? this.#options.applyEditsByDefault,
     );
     return transformationResult(
       transaction.proposal.edits,
@@ -548,7 +549,7 @@ export class AgdaApplicationService implements AgdaService {
       }),
       planAutoEdit,
       signalOptions(context),
-      request.apply === true,
+      request.apply ?? this.#options.applyEditsByDefault,
     );
     const base = editPreviewData(
       transaction.proposal.edits,

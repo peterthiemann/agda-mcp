@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { runCli, type CliIo } from "../../src/cli.js";
+import type { StdioServerOptions } from "../../src/mcp/stdioServer.js";
 import { VERSION } from "../../src/version.js";
 
 function captureIo(): { io: CliIo; stdout: string[]; stderr: string[] } {
@@ -21,6 +22,23 @@ test("--help describes the supported source formats", async () => {
   const output = captureIo();
   assert.equal(await runCli(["--help"], output.io), 0);
   assert.match(output.stdout.join(""), /\.agda, \.lagda, and \.lagda\.md/);
+  assert.match(output.stdout.join(""), /--apply-edits/);
+  assert.deepEqual(output.stderr, []);
+});
+
+test("--apply-edits enables the server-wide guarded mutation default", async () => {
+  const output = captureIo();
+  let received: StdioServerOptions | undefined;
+  assert.equal(
+    await runCli(["--apply-edits"], output.io, {
+      startServer: async (options) => {
+        received = options;
+      },
+    }),
+    0,
+  );
+  assert.deepEqual(received, { serverOptions: { applyEditsByDefault: true } });
+  assert.deepEqual(output.stdout, []);
   assert.deepEqual(output.stderr, []);
 });
 

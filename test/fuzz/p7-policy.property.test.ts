@@ -30,6 +30,16 @@ test("property: positive timeout and queue policies round-trip exactly", () => {
   );
 });
 
+test("property: the source-mutation default round-trips every boolean policy", () => {
+  fc.assert(
+    fc.property(fc.boolean(), (applyEditsByDefault) => {
+      const options = parseServerOptions({ applyEditsByDefault });
+      assert.equal(options.applyEditsByDefault, applyEditsByDefault);
+    }),
+    { seed: FUZZ_SEED ^ 0x50700003, numRuns: PROPERTY_RUNS },
+  );
+});
+
 test("property: a bounded queue accepts at most its configured pending count", async () => {
   await fc.assert(
     fc.asyncProperty(fc.integer({ min: 1, max: 16 }), async (maximum) => {

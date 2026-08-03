@@ -509,7 +509,7 @@ export function createAgdaMcpServer(
   server.registerTool(
     "agda_case_split",
     {
-      description: "Preview a case split, or atomically apply and typecheck it with apply:true",
+      description: "Case split using the server mutation policy; apply overrides that policy",
       inputSchema: caseSplitInputSchema,
     },
     async ({ goal, variables, apply, ...call }, extra) =>
@@ -535,7 +535,7 @@ export function createAgdaMcpServer(
   server.registerTool(
     "agda_refine",
     {
-      description: "Preview a refinement, or atomically apply and typecheck it with apply:true",
+      description: "Refine using the server mutation policy; apply overrides that policy",
       inputSchema: refineInputSchema,
     },
     async ({ goal, expression, usePatternLambda, apply, ...call }, extra) =>
@@ -562,7 +562,7 @@ export function createAgdaMcpServer(
   server.registerTool(
     "agda_auto",
     {
-      description: "Preview Agda proof search, or atomically apply and typecheck it with apply:true",
+      description: "Run Agda proof search using the server mutation policy; apply overrides it",
       inputSchema: autoInputSchema,
     },
     async ({ goal, query, apply, ...call }, extra) =>
@@ -789,16 +789,21 @@ async function clientWorkspaceRoots(server: McpServer): Promise<readonly string[
 export interface StdioServerOptions {
   readonly environment?: NodeJS.ProcessEnv;
   readonly cwd?: string;
+  /** Programmatic overrides, used by CLI flags; these win over the environment. */
+  readonly serverOptions?: ServerOptions;
 }
 
 export async function runStdioServer(options: StdioServerOptions = {}): Promise<void> {
   const environment = options.environment ?? process.env;
   const cwd = options.cwd ?? process.cwd();
+  const configured: ServerOptions = {
+    ...environmentOptions(environment),
+    ...options.serverOptions,
+  };
   let server!: McpServer;
   let servicePromise: Promise<AgdaApplicationService> | undefined;
   const serviceProvider = async (): Promise<AgdaApplicationService> => {
     servicePromise ??= (async () => {
-      const configured = environmentOptions(environment);
       const roots = configured.workspaceRoots ?? (await clientWorkspaceRoots(server));
       return AgdaApplicationService.create(
         parseServerOptions({
@@ -811,7 +816,6 @@ export async function runStdioServer(options: StdioServerOptions = {}): Promise<
   };
   // Resolved from configuration alone, so the defer window already covers the
   // first call — including the Agda discovery that service creation performs.
-  const configured = environmentOptions(environment);
   const jobOptions = parseServerOptions({
     ...configured,
     workspaceRoots: configured.workspaceRoots ?? [cwd],

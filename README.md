@@ -8,8 +8,9 @@ process per active workspace and supports on-disk `.agda`, `.lagda`, and
 The server exposes normalized, transport-independent results while retaining
 bounded metadata about Agda's native responses in a `raw` field. Native events
 are available on request. Case split, refine, and auto are non-mutating by
-default; an explicit `apply: true` atomically writes the guarded proposal and
-typechecks it in the same operation.
+default. An explicit `apply: true`, or starting the server with
+`--apply-edits`, atomically writes the guarded proposal and typechecks it in the
+same operation.
 
 ## End-to-end example
 
@@ -89,7 +90,8 @@ goal handles from the latest response should be used.
 
 For the faster compound forms, set `includeContexts: true` on step 1 to receive
 the goals and every goal context with the load result. Set `apply: true` on
-step 4 to have the server perform steps 5 and 6 as one guarded transaction:
+step 4—or enable `--apply-edits` once for the server—to have it perform steps 5
+and 6 as one guarded transaction:
 
 ```text
 agda_case_split({ "goal": "goal_…", "variables": "x", "apply": true })
@@ -98,8 +100,8 @@ agda_case_split({ "goal": "goal_…", "variables": "x", "apply": true })
 → data.goals = <fresh handles from the edited module>
 ```
 
-The preview flow above remains the default and is useful when the client wants
-to inspect or revise the proposal before changing the file.
+The preview flow remains the safe startup default and is useful when the client
+wants to inspect or revise the proposal before changing the file.
 
 ## Requirements
 
@@ -149,6 +151,35 @@ A generic MCP client configuration looks like this:
 If the client publishes filesystem roots through MCP, `workspaceRoots` may be
 omitted. Otherwise the server falls back to its working directory.
 
+### Enable in-place transformations
+
+Start the server with `--apply-edits` to make case split, refine, and auto
+write their proposed source changes and immediately typecheck them by default:
+
+```sh
+agda-mcp --apply-edits
+# or
+npx -y agda-mcp --apply-edits
+```
+
+For an MCP client configuration, add the flag to the command arguments:
+
+```json
+{
+  "command": "npx",
+  "args": ["-y", "agda-mcp", "--apply-edits"]
+}
+```
+
+Clients that configure the server through the environment can equivalently set
+`"applyEditsByDefault": true` inside `AGDA_MCP_OPTIONS`. The command-line flag
+wins over an environment value. `agda_server_info` reports the effective mode
+as `capabilities.transformationDefault`.
+
+This mode does not permit arbitrary writes: only edits proposed by Agda for the
+currently loaded, fingerprint-matching source are eligible. A particular tool
+call can still request `apply: false` to obtain a non-mutating preview.
+
 ## Configuration
 
 Initialization policy is supplied as a JSON object in `AGDA_MCP_OPTIONS`.
@@ -184,6 +215,7 @@ Unknown fields and invalid limits are rejected before an Agda process starts.
 | `progressIntervalMs` | Heartbeat for `notifications/progress` | `2000` |
 | `includeRawByDefault` | Ship Agda's native event log | `false` |
 | `maxBatchGoals` | Maximum goals one batched request may resolve | `32` |
+| `applyEditsByDefault` | Apply/typecheck transformations when `apply` is omitted | `false` |
 
 ## Non-blocking operation
 
@@ -226,7 +258,7 @@ call only:
 | `includeRaw` | Include Agda's native event log (see below) |
 | `diagnosticsOnly` | `agda_load_module` / `agda_typecheck` only: errors and warnings |
 | `includeContexts` | `agda_load_module` / `agda_typecheck` only: include all goal contexts |
-| `apply` | Transformation tools only: guarded write followed by an immediate typecheck |
+| `apply` | Transformation tools only: override server policy (`true` applies, `false` previews) |
 
 ```json
 { "modulePath": "/src/Slow.agda", "timeoutMs": 600000, "async": true }
@@ -349,8 +381,9 @@ transcript's own omission digest followed by every event the merge dropped.
 
 ## Transformation previews and guarded direct edits
 
-Without `apply`, case split, refine, and auto use the non-mutating preview
-transaction:
+Case split, refine, and auto select their behavior from the per-call `apply`
+value when present, otherwise from the server policy. With the default policy
+or `apply: false`, they use the non-mutating preview transaction:
 
 1. Validate the goal handle and loaded source fingerprint.
 2. Ask Agda for a proposal.
@@ -365,15 +398,17 @@ and expected SHA-256 source fingerprint. Clients should verify that fingerprint
 before applying an edit, then call `agda_typecheck`. If restoration fails, the
 server terminates and invalidates the session and returns no safe proposal.
 
-With `apply: true`, the server verifies the proposal targets the active module
-and fingerprint, rechecks the source immediately before writing, replaces the
-file atomically, and reloads/typechecks it once. The result reports `applied`,
-`checked`, `diagnostics`, the new source fingerprint, and fresh goal handles.
+With `apply: true`, or when `--apply-edits` supplies that default, the server
+verifies the proposal targets the active module and fingerprint, rechecks the
+source immediately before writing, replaces the file atomically, and
+reloads/typechecks it once. The result reports `applied`, `checked`,
+`diagnostics`, the new source fingerprint, and fresh goal handles.
 If the canonical reload itself fails, the server attempts a fingerprint-guarded
 rollback and refuses that rollback when the edited fingerprint no longer
 matches. Changes detected during proposal generation or immediately before an
 atomic replacement are rejected. File mutation is therefore opt-in per
-transformation call, while preview remains the default.
+transformation call or server startup, while preview remains available as an
+explicit override.
 An ordinary Agda type error is a completed result (`checked: false`), so the
 applied source remains on disk and its diagnostics are returned for the caller
 to address; rollback is reserved for failures that prevent a trustworthy
