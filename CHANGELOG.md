@@ -5,6 +5,8 @@ first.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-03
+
 ### Added
 
 - Added the `--dynamic-workspaces` startup flag and matching
@@ -107,6 +109,8 @@ first.
 - Added unit, integration, property-based, mutation-fuzz, live-Agda, MCP stdio,
   smoke, and packed-install tests.
 
+[Unreleased]: https://github.com/peterthiemann/agda-mcp/compare/release-0.4.0...HEAD
+[0.4.0]: https://github.com/peterthiemann/agda-mcp/compare/release-0.3.0...release-0.4.0
 [0.3.0]: https://github.com/peterthiemann/agda-mcp/compare/release-0.2.0...release-0.3.0
 [0.2.0]: https://github.com/peterthiemann/agda-mcp/compare/release-0.1.0...release-0.2.0
 [0.1.0]: https://github.com/peterthiemann/agda-mcp/releases/tag/release-0.1.0
