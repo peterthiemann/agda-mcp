@@ -34,6 +34,7 @@ fingerprint-guarded atomic write followed by an immediate typecheck.
 | Public results | Normalized objects plus bounded `raw` metadata; native events on request |
 | Configuration | MCP initialization options plus `.agda-lib` discovery; no mandatory new config file |
 | Runtime workspace selection | Restricted by default; `--dynamic-workspaces` permits a request-provided root |
+| MCP instructions | Initialization teaches the core load, handle, context, and mutation workflow in at most 512 characters |
 | Version baseline | Agda 2.8.0, detected rather than hardcoded at runtime |
 | Node.js baseline | Node.js 22 or newer; CI tests Node.js 22 and 24 |
 | Package manager | npm with a committed `package-lock.json` |
@@ -87,8 +88,9 @@ flowchart LR
 ### 5.1 Boundaries
 
 `McpTransport` maps MCP tool calls and cancellation into application requests.
-It owns no Agda semantics. A future HTTP transport should be able to reuse the
-same service.
+It also publishes concise server-wide workflow instructions during MCP
+initialization. It owns no Agda semantics. A future HTTP transport should be
+able to reuse the same service and instructions.
 
 `AgdaService` exposes typed application operations such as `loadModule`,
 `getContext`, and `previewRefine`. It returns transport-neutral domain objects.

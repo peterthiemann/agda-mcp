@@ -8,6 +8,7 @@ import type { AgdaService } from "../../src/application/agdaService.js";
 import type { NormalizedResult } from "../../src/application/domain.js";
 import { APPLICATION_ERROR_CODES, ApplicationError } from "../../src/application/errors.js";
 import {
+  AGDA_MCP_INSTRUCTIONS,
   applicationErrorPayload,
   createAgdaMcpServer,
 } from "../../src/mcp/stdioServer.js";
@@ -44,6 +45,27 @@ function recordingService(calls: string[], loadRequests: unknown[] = []): AgdaSe
     },
   });
 }
+
+test("MCP initialization publishes a self-contained Agda workflow", async () => {
+  const server = createAgdaMcpServer(async () => recordingService([]));
+  const client = new Client({ name: "agda-mcp-instructions", version: "1" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  try {
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    assert.equal(client.getInstructions(), AGDA_MCP_INSTRUCTIONS);
+    assert.ok(AGDA_MCP_INSTRUCTIONS.length <= 512);
+    assert.match(AGDA_MCP_INSTRUCTIONS, /agda_server_info/);
+    assert.match(AGDA_MCP_INSTRUCTIONS, /workspaceRoot/);
+    assert.match(AGDA_MCP_INSTRUCTIONS, /includeContexts:true/);
+    assert.match(AGDA_MCP_INSTRUCTIONS, /transformationDefault/);
+    assert.match(AGDA_MCP_INSTRUCTIONS, /apply:false/);
+    assert.match(AGDA_MCP_INSTRUCTIONS, /apply:true/);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
 
 test("all twelve strict schemas dispatch to their transport-independent service operations", async () => {
   const calls: string[] = [];

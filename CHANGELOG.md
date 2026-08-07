@@ -5,6 +5,13 @@ first.
 
 ## [Unreleased]
 
+### Added
+
+- Added MCP initialization `instructions` that teach clients the core Agda
+  workflow, including policy discovery, dynamic workspace loading, compound
+  context retrieval, fresh opaque-handle use, and transformation mutation
+  overrides. The complete guidance fits within Codex's first 512 characters.
+
 ## [0.4.0] - 2026-08-03
 
 ### Added

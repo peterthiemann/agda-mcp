@@ -336,7 +336,10 @@ export function createAgdaMcpServer(
 ): McpServer {
   const server = new McpServer(
     { name: "agda-mcp", version: VERSION },
-    { capabilities: { logging: {} } },
+    {
+      capabilities: { logging: {} },
+      instructions: AGDA_MCP_INSTRUCTIONS,
+    },
   );
   let fallbackRegistry: JobRegistry<NormalizedResult<unknown>> | undefined;
   const baseProvider: JobRegistryProvider =
@@ -766,6 +769,9 @@ export function createAgdaMcpServer(
 
   return server;
 }
+
+export const AGDA_MCP_INSTRUCTIONS =
+  "Use this server for on-disk Agda proof development. Call agda_server_info first to learn workspace and mutation policies. Load with agda_load_module using absolute modulePath and, when workspaceSelection is request, absolute workspaceRoot; prefer includeContexts:true. Reuse only goal handles from the newest result because reloads and transformations invalidate older goal handles. Case split, refine, and auto follow transformationDefault; apply:false previews, while apply:true applies and typechecks.";
 
 function environmentOptions(environment: NodeJS.ProcessEnv): ServerOptions {
   const encoded = environment.AGDA_MCP_OPTIONS;

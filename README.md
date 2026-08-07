@@ -135,6 +135,14 @@ npm exec --yes agda-mcp
 The default command starts an MCP stdio server. Stdout is reserved exclusively
 for MCP framing; operational diagnostics use stderr.
 
+During MCP initialization the server publishes concise `instructions` that
+teach the client the core workflow: inspect effective policy, load an absolute
+module and optional request-selected workspace, prefer compound context
+retrieval, reuse only fresh opaque goal handles, and distinguish preview from
+guarded apply/typecheck transformations. The complete instruction block fits
+within the self-contained 512-character prefix recommended for Codex
+tool-selection guidance.
+
 A generic model-selected workspace configuration looks like this:
 
 ```json
