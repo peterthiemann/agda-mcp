@@ -7,3 +7,6 @@ coverage/
 _build/
 .DS_Store
 *.log
+
+# Portable plugin staging and release artifacts
+.plugin-build/

@@ -1,9 +1,17 @@
 # Agda MCP Server: Implementation Plan
 
-Status: implemented
+Status: historical implementation plan (initial milestones implemented)
 Date: 2026-07-18  
 Source design: [DESIGN.md](./DESIGN.md)  
 Tested Agda baseline: 2.8.0
+
+This is the original twelve-tool delivery plan. Its milestones, preview-only
+acceptance criteria, and deferred-work list describe that initial scope. Later
+releases added guarded mutation, batched contexts, job controls, dynamic
+workspaces, skill discovery and dual-era MCP support. Direct mutation and extra
+tools are therefore no longer deferred in the current implementation. Use
+[README.md](README.md), [INSTALL.md](INSTALL.md), and [CHANGELOG.md](CHANGELOG.md)
+for the current 18-tool behavior and 0.5.0 release preparation.
 
 ## 1. Delivery strategy
 

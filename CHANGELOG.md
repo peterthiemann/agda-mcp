@@ -5,6 +5,27 @@ first.
 
 ## [Unreleased]
 
+### Added
+
+- Bundled `agda-proof` Agent Skill and references in the npm package, with
+  incremental proof development preferring guarded MCP mutations.
+- Server-side skill discovery: `skills/list`, `skills/get`, and ordinary MCP
+  resources, with complete byte sizes/SHA-256 manifests and process-lifetime
+  content snapshots. Discovery works without Agda or a loaded module.
+- Modern MCP 2026-07-28 support through the official v2 server SDK, retaining
+  initialization-era clients through the same stdio executable. Includes
+  per-request version/capability metadata, modern discovery/result formats,
+  multi-round-trip workspace roots, cancellation and EOF cleanup.
+- A request-version guard rejects unsupported claims even after the stdio
+  connection is pinned; v1 clients remain independent regression fixtures.
+- Portable plugin manifests, pinned npm command, installation/update guidance,
+  repeatable ZIP packaging, and packed-install/live proof smoke checks.
+
+### Changed
+
+- Prepared server and plugin version 0.5.0; publishing remains a separate step.
+- Server initialization instructions point to the skill resource.
+
 ## [0.4.1] - 2026-08-07
 
 ### Added
