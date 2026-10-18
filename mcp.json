@@ -1,0 +1,10 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "agda": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["--yes", "agda-mcp@0.5.0", "--dynamic-workspaces"]
+    }
+  }
+}

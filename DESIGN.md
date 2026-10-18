@@ -1,8 +1,15 @@
 # Agda MCP Server: Initial Design
 
-Status: implemented; updated with post-0.2 extensions
+Status: historical design, with selected post-0.2 annotations
 Date: 2026-07-18
 Tested Agda baseline: 2.8.0
+
+This document records the initial architecture and selected later amendments;
+it is not the current protocol or release contract. The current 0.5.0 candidate
+has 18 tools, guarded in-place transformations, deferred jobs, bundled skill
+discovery, and modern MCP 2026-07-28 with legacy-client compatibility. See
+[README.md](README.md) for current behavior, [INSTALL.md](INSTALL.md) for plugin
+installation and packaging, and [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ## 1. Purpose
 
@@ -32,7 +39,7 @@ fingerprint-guarded atomic write followed by an immediate typecheck.
 | Preview recovery | Reload the unchanged module after each preview |
 | Goal selection | Opaque goal handles only |
 | Public results | Normalized objects plus bounded `raw` metadata; native events on request |
-| Configuration | MCP initialization options plus `.agda-lib` discovery; no mandatory new config file |
+| Configuration | CLI flags and `AGDA_MCP_OPTIONS` plus `.agda-lib` discovery; no mandatory new config file |
 | Runtime workspace selection | Restricted by default; `--dynamic-workspaces` permits a request-provided root |
 | MCP instructions | Initialization teaches the core load, handle, context, and mutation workflow in at most 512 characters |
 | Version baseline | Agda 2.8.0, detected rather than hardcoded at runtime |

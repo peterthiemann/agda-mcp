@@ -1,0 +1,3 @@
+interface:
+  display_name: "Agda Proof"
+  short_description: "Develop on-disk Agda proofs with semantic MCP tools"

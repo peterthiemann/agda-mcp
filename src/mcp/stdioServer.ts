@@ -1,7 +1,8 @@
 import { fileURLToPath } from "node:url";
+import * as z from "zod/v4";
 
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { McpServer, inputRequired, type ServerContext, type InputRequiredResult } from "@modelcontextprotocol/server";
+import { StdioServerTransport, serveStdio } from "@modelcontextprotocol/server/stdio";
 
 import type { AgdaService } from "../application/agdaService.js";
 import {
@@ -15,6 +16,8 @@ import { ApplicationError, isApplicationError } from "../application/errors.js";
 import { JobRegistry, type JobSummary } from "../application/jobs.js";
 import { AgdaApplicationService } from "../application/service.js";
 import { VERSION } from "../version.js";
+import { registerSkillDiscovery } from "./skillDiscovery.js";
+import { checkRequestVersions } from "./modernTransport.js";
 import {
   autoInputSchema,
   caseSplitInputSchema,
@@ -224,20 +227,7 @@ function shapeResult(
   return { ...result, data, raw };
 }
 
-/** The subset of the SDK's handler context this module relies on. */
-interface RequestExtra {
-  readonly signal: AbortSignal;
-  readonly _meta?: { readonly progressToken?: string | number | undefined } | undefined;
-  readonly sendNotification: (notification: {
-    method: "notifications/progress";
-    params: {
-      progressToken: string | number;
-      progress: number;
-      total?: number | undefined;
-      message?: string | undefined;
-    };
-  }) => Promise<void>;
-}
+type PrepareRequest = (context: ServerContext) => Promise<InputRequiredResult | undefined>;
 
 function runOverrides(call: CallOptions) {
   return {
@@ -256,19 +246,19 @@ function operationContext(call: CallOptions, signal: AbortSignal) {
  * purely advisory: failures to notify never affect the operation.
  */
 async function withProgress<T>(
-  extra: RequestExtra,
+  extra: ServerContext,
   label: string,
   intervalMs: number,
   work: Promise<T>,
 ): Promise<T> {
-  const progressToken = extra._meta?.progressToken;
+  const progressToken = extra.mcpReq._meta?.progressToken;
   if (progressToken === undefined || intervalMs <= 0) return work;
 
   const startedAt = Date.now();
   const timer = setInterval(() => {
     const elapsedMs = Date.now() - startedAt;
-    void extra
-      .sendNotification({
+    void extra.mcpReq
+      .notify({
         method: "notifications/progress",
         params: {
           progressToken,
@@ -300,12 +290,15 @@ async function invoke(
   jobsProvider: JobRegistryProvider,
   tool: string,
   call: CallOptions,
-  extra: RequestExtra,
+  extra: ServerContext,
   operation: (context: { signal: AbortSignal; timeoutMs?: number }) => Promise<NormalizedResult<unknown>>,
   progressIntervalMs: number,
   includeRawByDefault: boolean,
+  prepareRequest?: PrepareRequest,
 ) {
   try {
+    const required = await prepareRequest?.(extra);
+    if (required) return required;
     const jobs = await jobsProvider();
     const shaping = {
       includeRaw: call.includeRaw ?? includeRawByDefault,
@@ -318,7 +311,7 @@ async function invoke(
       jobs.run(
         tool,
         async (signal) => shapeResult(await operation(operationContext(call, signal)), shaping),
-        extra.signal,
+        extra.mcpReq.signal,
         runOverrides(call),
       ),
     );
@@ -333,6 +326,7 @@ export function createAgdaMcpServer(
   jobRegistryProvider?: JobRegistryProvider,
   progressIntervalMs: number = DEFAULT_PROGRESS_INTERVAL_MS,
   includeRawByDefault: boolean = DEFAULT_INCLUDE_RAW,
+  prepareRequest?: PrepareRequest,
 ): McpServer {
   const server = new McpServer(
     { name: "agda-mcp", version: VERSION },
@@ -341,20 +335,24 @@ export function createAgdaMcpServer(
       instructions: AGDA_MCP_INSTRUCTIONS,
     },
   );
+  registerSkillDiscovery(server);
   let fallbackRegistry: JobRegistry<NormalizedResult<unknown>> | undefined;
   const baseProvider: JobRegistryProvider =
     jobRegistryProvider ??
     (async () => (fallbackRegistry ??= new JobRegistry<NormalizedResult<unknown>>()));
 
-  // Announce completions over the logging channel, the only spec-correct way to
-  // reach a client outside an open request. It does not wake an agent mid-turn,
-  // but it surfaces "Agda finished" in clients that display server logs.
+  // Legacy connections retain out-of-band logging notifications. Modern
+  // completions use stderr; MCP messages stay scoped to active requests.
   let observed: JobRegistry<NormalizedResult<unknown>> | undefined;
   const jobs: JobRegistryProvider = async () => {
     const registry = await baseProvider();
     if (observed !== registry) {
       observed = registry;
       registry.onSettled((job) => {
+        if (server.server.getClientCapabilities() === undefined) {
+          process.stderr.write(`${job.tool} ${job.state} after ${job.elapsedMs}ms (job ${job.id})\n`);
+          return;
+        }
         void server.server
           .sendLoggingMessage({
             level: job.state === "succeeded" ? "info" : "warning",
@@ -382,6 +380,7 @@ export function createAgdaMcpServer(
         async (context) => (await serviceProvider()).serverInfo(context),
         progressIntervalMs,
         includeRawByDefault,
+        prepareRequest,
       ),
   );
 
@@ -409,6 +408,7 @@ export function createAgdaMcpServer(
           ),
         progressIntervalMs,
         includeRawByDefault,
+        prepareRequest,
       ),
   );
 
@@ -431,6 +431,7 @@ export function createAgdaMcpServer(
           ),
         progressIntervalMs,
         includeRawByDefault,
+        prepareRequest,
       ),
   );
 
@@ -449,6 +450,7 @@ export function createAgdaMcpServer(
         async (context) => (await serviceProvider()).retrieveGoals({ workspace }, context),
         progressIntervalMs,
         includeRawByDefault,
+        prepareRequest,
       ),
   );
 
@@ -471,6 +473,7 @@ export function createAgdaMcpServer(
           ),
         progressIntervalMs,
         includeRawByDefault,
+        prepareRequest,
       ),
   );
 
@@ -494,6 +497,7 @@ export function createAgdaMcpServer(
           ),
         progressIntervalMs,
         includeRawByDefault,
+        prepareRequest,
       ),
   );
 
@@ -512,6 +516,7 @@ export function createAgdaMcpServer(
         async (context) => (await serviceProvider()).retrieveConstraints({ workspace }, context),
         progressIntervalMs,
         includeRawByDefault,
+        prepareRequest,
       ),
   );
 
@@ -538,6 +543,7 @@ export function createAgdaMcpServer(
           ),
         progressIntervalMs,
         includeRawByDefault,
+        prepareRequest,
       ),
   );
 
@@ -565,6 +571,7 @@ export function createAgdaMcpServer(
           ),
         progressIntervalMs,
         includeRawByDefault,
+        prepareRequest,
       ),
   );
 
@@ -591,6 +598,7 @@ export function createAgdaMcpServer(
           ),
         progressIntervalMs,
         includeRawByDefault,
+        prepareRequest,
       ),
   );
 
@@ -618,6 +626,7 @@ export function createAgdaMcpServer(
           ),
         progressIntervalMs,
         includeRawByDefault,
+        prepareRequest,
       ),
   );
 
@@ -645,6 +654,7 @@ export function createAgdaMcpServer(
           ),
         progressIntervalMs,
         includeRawByDefault,
+        prepareRequest,
       ),
   );
 
@@ -663,6 +673,7 @@ export function createAgdaMcpServer(
         async (context) => (await serviceProvider()).queryMetavariables({ workspace }, context),
         progressIntervalMs,
         includeRawByDefault,
+        prepareRequest,
       ),
   );
 
@@ -694,7 +705,7 @@ export function createAgdaMcpServer(
       try {
         const registry = await jobs();
         const outcome = await withProgress(
-          extra as RequestExtra,
+          extra,
           "agda_job_await_any",
           progressIntervalMs,
           registry.awaitAny(ids, waitMs),
@@ -771,7 +782,7 @@ export function createAgdaMcpServer(
 }
 
 export const AGDA_MCP_INSTRUCTIONS =
-  "Use this server for on-disk Agda proof development. Call agda_server_info first to learn workspace and mutation policies. Load with agda_load_module using absolute modulePath and, when workspaceSelection is request, absolute workspaceRoot; prefer includeContexts:true. Reuse only goal handles from the newest result because reloads and transformations invalidate older goal handles. Case split, refine, and auto follow transformationDefault; apply:false previews, while apply:true applies and typechecks.";
+  "For Agda proof workflows read skill://agda-proof/SKILL.md. Call agda_server_info first for workspace and mutation policies. Load absolute modulePath; supply workspaceRoot when workspaceSelection is request; prefer includeContexts:true. Use only newest goal handles: reloads and transformations invalidate old ones. Case split, refine, auto follow transformationDefault; apply:false previews; apply:true applies and typechecks. Prefer apply:true for incremental proof edits.";
 
 function environmentOptions(environment: NodeJS.ProcessEnv): ServerOptions {
   const encoded = environment.AGDA_MCP_OPTIONS;
@@ -812,46 +823,51 @@ export async function runStdioServer(options: StdioServerOptions = {}): Promise<
     ...environmentOptions(environment),
     ...options.serverOptions,
   };
-  let server!: McpServer;
-  let servicePromise: Promise<AgdaApplicationService> | undefined;
-  const serviceProvider = async (): Promise<AgdaApplicationService> => {
-    servicePromise ??= (async () => {
-      const roots = configured.workspaceRoots ?? (await clientWorkspaceRoots(server));
-      return AgdaApplicationService.create(
-        parseServerOptions({
-          ...configured,
-          workspaceRoots: roots.length === 0 ? [cwd] : roots,
-        }),
-      );
-    })();
-    return servicePromise;
-  };
-  // Resolved from configuration alone, so the defer window already covers the
-  // first call — including the Agda discovery that service creation performs.
-  const jobOptions = parseServerOptions({
-    ...configured,
-    workspaceRoots: configured.workspaceRoots ?? [cwd],
-  });
-  let registry: JobRegistry<NormalizedResult<unknown>> | undefined;
-  const jobRegistryProvider: JobRegistryProvider = async () =>
-    (registry ??= new JobRegistry<NormalizedResult<unknown>>({
-      asyncMode: jobOptions.asyncMode,
-      deferAfterMs: jobOptions.deferAfterMs,
-      maxJobWaitMs: jobOptions.maxJobWaitMs,
-      jobRetentionMs: jobOptions.jobRetentionMs,
-      maxTrackedJobs: jobOptions.maxTrackedJobs,
-      handleEntropyBytes: jobOptions.handleEntropyBytes,
-    }));
-  server = createAgdaMcpServer(
-    serviceProvider,
-    jobRegistryProvider,
-    jobOptions.progressIntervalMs,
-    jobOptions.includeRawByDefault,
-  );
-  const transport = new StdioServerTransport();
-  transport.onclose = () => {
-    registry?.cancelAll();
-    void servicePromise?.then((service) => service.shutdown());
-  };
-  await server.connect(transport);
+  // The factory owns process-lifetime Agda sessions and explicit job/goal handles.
+  // serveStdio chooses the protocol era; the same implementation serves both.
+  serveStdio(() => {
+    let server!: McpServer;
+    let servicePromise: Promise<AgdaApplicationService> | undefined;
+    let modernRoots: readonly string[] | undefined;
+    const prepareRequest: PrepareRequest = async (context) => {
+      if (servicePromise || configured.workspaceRoots !== undefined || configured.allowDynamicWorkspaces) return;
+      const envelope = context.mcpReq.envelope;
+      if (!envelope) return;
+      const parsed = z.object({
+        "io.modelcontextprotocol/clientCapabilities": z.object({ roots: z.object({}).optional() }),
+      }).safeParse(envelope);
+      if (!parsed.success || !parsed.data["io.modelcontextprotocol/clientCapabilities"].roots) return;
+      const response = context.mcpReq.inputResponses?.workspaceRoots;
+      if (response === undefined) {
+        return inputRequired({ inputRequests: { workspaceRoots: inputRequired.listRoots() } });
+      }
+      const resolved = z.object({ roots: z.array(z.object({ uri: z.string() })) }).safeParse(response);
+      if (!resolved.success) throw new ApplicationError("INVALID_ARGUMENT", "Invalid workspace roots input response");
+      modernRoots = resolved.data.roots.filter((root) => root.uri.startsWith("file:")).map((root) => fileURLToPath(root.uri));
+    };
+    const serviceProvider = async (): Promise<AgdaApplicationService> => {
+      servicePromise ??= (async () => {
+        const roots = configured.workspaceRoots ?? modernRoots ?? (await clientWorkspaceRoots(server));
+        return AgdaApplicationService.create(parseServerOptions({
+          ...configured, workspaceRoots: roots.length === 0 ? [cwd] : roots,
+        }));
+      })();
+      return servicePromise;
+    };
+    const jobOptions = parseServerOptions({ ...configured, workspaceRoots: configured.workspaceRoots ?? [cwd] });
+    let registry: JobRegistry<NormalizedResult<unknown>> | undefined;
+    const jobRegistryProvider: JobRegistryProvider = async () =>
+      (registry ??= new JobRegistry<NormalizedResult<unknown>>({
+        asyncMode: jobOptions.asyncMode, deferAfterMs: jobOptions.deferAfterMs,
+        maxJobWaitMs: jobOptions.maxJobWaitMs, jobRetentionMs: jobOptions.jobRetentionMs,
+        maxTrackedJobs: jobOptions.maxTrackedJobs, handleEntropyBytes: jobOptions.handleEntropyBytes,
+      }));
+    server = createAgdaMcpServer(serviceProvider, jobRegistryProvider,
+      jobOptions.progressIntervalMs, jobOptions.includeRawByDefault, prepareRequest);
+    server.server.onclose = () => {
+      registry?.cancelAll();
+      void servicePromise?.then((service) => service.shutdown()).catch(() => undefined);
+    };
+    return server;
+  }, { legacy: "serve", transport: checkRequestVersions(new StdioServerTransport()), onerror: (error) => { process.stderr.write(`agda-mcp: ${error.message}\n`); } });
 }

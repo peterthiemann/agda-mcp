@@ -117,6 +117,10 @@ not bundle Agda or the standard library.
 
 ## Installation and use
 
+These commands install the published npm version. Features described for the
+unreleased 0.5.0 candidate require a source build or local tarball until that
+version is published; see [INSTALL.md](INSTALL.md#pack--smoke-testing-an-unreleased-server).
+
 Install the CLI globally:
 
 ```sh
@@ -135,7 +139,7 @@ npm exec --yes agda-mcp
 The default command starts an MCP stdio server. Stdout is reserved exclusively
 for MCP framing; operational diagnostics use stderr.
 
-During MCP initialization the server publishes concise `instructions` that
+Legacy `initialize` and modern `server/discover` publish concise `instructions` that
 teach the client the core workflow: inspect effective policy, load an absolute
 module and optional request-selected workspace, prefer compound context
 retrieval, reuse only fresh opaque goal handles, and distinguish preview from
@@ -224,6 +228,86 @@ as `capabilities.transformationDefault`.
 This mode does not permit arbitrary writes: only edits proposed by Agda for the
 currently loaded, fingerprint-matching source are eligible. A particular tool
 call can still request `apply: false` to obtain a non-mutating preview.
+
+## Agent Skill and portable plugin
+
+The [Agda proof skill](skills/agda-proof/SKILL.md) teaches incremental proof
+development using semantic MCP operations, preferring guarded mutations for
+authorized proof edits. The portable plugin pairs it with an exact npm server
+pin. See [installation and updates](INSTALL.md) for requirements, local plugin
+installation, workspace configuration, and acceptance checks.
+
+Build a distributable archive with `make pack-plugin`; verify its pinned server
+on a temporary proof with `make smoke-plugin`. The archive and SHA-256 sidecar
+are written under `.plugin-build/`. This is separate from the server npm release
+pipeline. The npm package also includes `skills/agda-proof` and serves its
+files independently of the working directory and Agda installation.
+
+### Server-side skill discovery
+
+The server advertises `io.modelcontextprotocol/skills` in
+`capabilities.extensions` through modern discovery and legacy initialization,
+and exposes:
+
+- `skills/list`: one complete skill entry, including verbatim YAML frontmatter
+  and a manifest of every bundled skill file's URI, byte size, and SHA-256 digest.
+- `skills/get({uri:"skill://agda-proof/SKILL.md"})`: the same entry by URI.
+- `resources/list` and `resources/read`: the entrypoint, references, and UI
+  metadata at `skill://agda-proof/...`; unknown resources return Invalid params.
+
+### Modern MCP and backward compatibility
+
+The CLI uses the official v2 SDK's dual-era stdio entry. A modern client sends
+`server/discover` or another request with MCP 2026-07-28 metadata and proceeds
+without initialization. Every modern request carries its version and client
+capabilities in `_meta`; results include `resultType`, server identity, and the
+required cache fields on cacheable operations.
+For example, this newline-delimited JSON request discovers the modern server:
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}
+```
+
+Include those two metadata fields on subsequent modern requests as well.
+`io.modelcontextprotocol/clientInfo` is optional. The server's identity appears
+in the response's `_meta["io.modelcontextprotocol/serverInfo"]`, rather than a
+modern top-level `serverInfo` field. Unsupported version claims are
+rejected on every request, including after the connection has been established.
+
+Existing clients continue to use `initialize` and `notifications/initialized`
+with the same 18 tools, inputs, normalized payloads, and application job handles.
+A modern discovery probe can be followed by a legacy initialization on the same
+stdio connection. No flag or separate executable is needed. Modern-capable SDK
+clients can opt into automatic negotiation or pin `2026-07-28`; old SDK clients
+remain covered by the regression and packed-install tests.
+
+Modern workspace-root discovery uses an `input_required` result containing
+`roots/list`, then resumes the original operation with the client's response.
+It happens before starting an Agda job and never emits a server-initiated
+JSON-RPC request to a modern client. Explicit configured roots or
+`--dynamic-workspaces` avoid that exchange; legacy client roots retain their
+existing request/response behavior. Long-lived Agda sessions and deferred jobs
+remain application state referenced by opaque workspace, goal, and job handles.
+
+Progress is scoped to an in-flight request. Completion notices for deferred
+modern jobs go to stderr; legacy clients retain the existing logging
+notifications. Cancellation and EOF shut down active work and child processes.
+The server remains a stdio server; this upgrade does not add an HTTP endpoint.
+
+Protocol and migration references:
+[modern MCP](https://modelcontextprotocol.io/specification/2026-07-28/basic),
+[SDK dual-era stdio serving](https://ts.sdk.modelcontextprotocol.io/v2/serving/stdio).
+
+Catalog content is snapshotted for the life of a server instance so its digests
+and resource reads agree; restart after updating skill files. Discovery never
+starts Agda. Reading a resource is not skill activation or authorization: that
+remains the host's responsibility. When both the plugin and server expose the
+skill, hosts should preserve its origin rather than silently substituting one
+copy for the other.
+
+Version 0.5.0 is prepared locally and must be published before the plugin's
+pinned npm command is available to other users. Test the unreleased tarball
+with `npm run test:package` and the local-package smoke option in INSTALL.md.
 
 ## Configuration
 
@@ -317,7 +401,8 @@ window but can never reintroduce unbounded blocking.
 
 While a request is open the server emits `notifications/progress` every
 `progressIntervalMs`, provided the client supplied a progress token. When any
-job settles it also emits a `notifications/message` log line. Neither can wake
+job settles it emits a `notifications/message` log line for legacy clients
+and a stderr completion notice for modern clients. Neither can wake
 an agent mid-turn — MCP has no such mechanism — but they surface activity in
 clients that display progress or server logs.
 
@@ -530,26 +615,45 @@ No npm token or GitHub Actions secret is required. The workflow uses a
 short-lived OpenID Connect credential and npm automatically records provenance
 for the public package.
 
-For a release, update `package.json` and `package-lock.json` to the intended
-version, commit and push that change, then push an annotated tag named
-`release-X.Y` or `release-X.Y.Z`. The two-part form is normalized to `X.Y.0`;
-the resulting version must match `package.json` exactly. For example:
+For a release, synchronize `package.json`, `package-lock.json`, `src/version.ts`,
+`plugin.json`, and the exact `agda-mcp@X.Y.Z` pin in `mcp.json`. Update the
+versioned examples in INSTALL.md as well. The npm version command updates only
+the two npm metadata files; it does not update the source constant or plugin
+configuration. For the prepared 0.5.0 release:
 
 ```sh
-npm version 0.3.0 --no-git-tag-version
-git add package.json package-lock.json
-git commit -m "Release 0.3.0"
+npm version 0.5.0 --allow-same-version --no-git-tag-version
+# Update src/version.ts, plugin.json, mcp.json, and INSTALL.md to match.
+npm run typecheck
+npm run test:all
+npm run build
+npm run test:package
+make check-plugin
+make pack-plugin
+# Run both local-tarball smoke checks from INSTALL.md before publishing.
+git add package.json package-lock.json src/version.ts plugin.json mcp.json INSTALL.md
+git commit -m "Release 0.5.0"
 git push
-git tag -a release-0.3.0 -m "Release 0.3.0"
-git push origin release-0.3.0
+git tag -a release-0.5.0 -m "Release 0.5.0"
+git push origin release-0.5.0
 ```
+
+Commit the complete implementation and skill before tagging, including all new
+files; the `git add` line above lists the version-related files only. Tags may
+be named `release-X.Y` or `release-X.Y.Z`; a two-part version normalizes to
+`X.Y.0` and must match `package.json` exactly. Pushing the tag publishes the npm
+server through the workflow. The plugin ZIP is built separately with
+`make pack-plugin`; the release workflow currently attaches only the npm
+tarball and its checksum, not the plugin ZIP. Publish the pinned npm version
+before distributing the plugin for normal registry-backed installation.
 
 The tag workflow validates the version, installs from the lockfile, runs the
 typecheck and complete test suite, builds and smoke-tests the executable, packs
 the exact tarball, publishes that tarball to npm through trusted publishing,
 and finally creates the GitHub release with the tarball and its SHA-256 file.
-Merely changing or pushing the workflow does not publish a package; only a new
-matching `release-*` tag triggers it. npm versions are immutable, so verify the
+Changing the workflow alone does not publish a package. Publishing runs on a
+matching `release-*` tag push, or a manual workflow dispatch naming an existing
+release tag. npm versions are immutable, so verify the
 version before pushing the tag.
 
 ## Genesis and Codex involvement
@@ -565,7 +669,7 @@ mandatory reload.
 
 Codex turned that dialogue into the initial design and implementation plan,
 then implemented the repository in reviewed checkpoints. Its work included the
-protocol codec and streaming parser, process/session management, the twelve MCP
+protocol codec and streaming parser, process/session management, the initial twelve MCP
 tools, literate-source edit planning, recovery and packaging, documentation,
 and the unit, integration, property-based, mutation-fuzz, live-Agda, and MCP
 stdio tests. Codex also staged, committed, pushed, and followed the CI results

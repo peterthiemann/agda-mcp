@@ -33,7 +33,7 @@ test("package metadata enforces the P0 runtime contract", async () => {
   assert.equal(metadata.type, "module");
   assert.equal(metadata.engines?.node, ">=22");
   assert.equal(metadata.bin?.["agda-mcp"], "./dist/index.js");
-  assert.deepEqual(metadata.files, ["dist", "README.md"]);
+  assert.deepEqual(metadata.files, ["dist", "README.md", "skills/agda-proof", "plugin.json", "mcp.json", "INSTALL.md"]);
 
   const lock = JSON.parse(await readFile("package-lock.json", "utf8")) as PackageLockMetadata;
   assert.equal(lock.name, metadata.name);
