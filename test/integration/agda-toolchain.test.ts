@@ -18,15 +18,15 @@ test("detects the Agda 2.8.0 integration baseline when available", async (contex
     return;
   }
 
-  if (installation.version !== "2.8.0") {
+  if (!/^2\.8\.0(?:-[0-9a-f]{7,40})?$/.test(installation.version)) {
     context.skip(`Agda ${installation.version} is installed; baseline integration requires 2.8.0`);
     return;
   }
 
-  assert.equal(installation.version, "2.8.0");
+  assert.match(installation.version, /^2\.8\.0(?:-[0-9a-f]{7,40})?$/);
   assert.equal(installation.adapter, "agda-2.8.0");
-  assert.equal(installation.compatibility, "supported");
-  assert.equal(installation.warnings.length, 0);
+  assert.equal(installation.compatibility, installation.version === "2.8.0" ? "supported" : "unverified");
+  assert.equal(installation.warnings.length, installation.version === "2.8.0" ? 0 : 1);
   assert.match(installation.executable, /agda/u);
   assert.equal(installation.applicationDirectory.startsWith("/"), true);
   assert.equal(installation.dataDirectory.startsWith("/"), true);

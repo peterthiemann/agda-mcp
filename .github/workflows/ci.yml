@@ -8,6 +8,46 @@ permissions:
   contents: read
 
 jobs:
+  constraints:
+    name: Targeted compatibility / Agda ${{ matrix.agda }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        agda: ["2.8.0", "2.9.0"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+          cache: npm
+      - run: npm ci
+      - run: npm run test:compile
+      - name: Download official Agda binary into isolated test directory
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AGDA_VERSION: ${{ matrix.agda }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/agda/home"
+          gh release download "v$AGDA_VERSION" --repo agda/agda \
+            --pattern "Agda-v$AGDA_VERSION-linux.tar.xz" --dir "$RUNNER_TEMP/agda"
+          tar -xJf "$RUNNER_TEMP/agda/Agda-v$AGDA_VERSION-linux.tar.xz" -C "$RUNNER_TEMP/agda"
+      - name: Exercise constraints and targeted proof workflows through MCP
+        env:
+          HOME: ${{ runner.temp }}/agda/home
+          XDG_CONFIG_HOME: ${{ runner.temp }}/agda/home/.config
+          XDG_DATA_HOME: ${{ runner.temp }}/agda/home/.local/share
+          XDG_CACHE_HOME: ${{ runner.temp }}/agda/home/.cache
+          AGDA_TEST_EXECUTABLE: ${{ runner.temp }}/agda/agda
+          AGDA_TEST_VERSION: ${{ matrix.agda }}
+        run: |
+          export PATH="$RUNNER_TEMP/agda:$PATH"
+          if [ "$AGDA_TEST_VERSION" = "2.8.0" ]; then
+            node scripts/run-tests.mjs integration
+          else
+            node --test .test-dist/test/integration/constraints-versions.test.js .test-dist/test/integration/targeted-compatibility.test.js
+          fi
+
   node:
     name: Node.js ${{ matrix.node }}
     runs-on: ubuntu-latest

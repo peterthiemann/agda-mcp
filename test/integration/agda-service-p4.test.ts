@@ -13,7 +13,7 @@ async function baseline(context: test.TestContext, workspaceRoot: string) {
   const options = parseServerOptions({ workspaceRoots: [workspaceRoot], commandTimeoutMs: 120_000 });
   try {
     const installation = await discoverAgdaInstallation(options);
-    if (installation.version !== "2.8.0") {
+    if (!/^2\.8\.0(?:-[0-9a-f]{7,40})?$/.test(installation.version)) {
       context.skip(`Agda ${installation.version} is installed; live baseline requires 2.8.0`);
       return undefined;
     }

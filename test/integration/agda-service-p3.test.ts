@@ -18,7 +18,7 @@ test("live sessions load complete and incomplete modules in all source formats",
     context.skip(`Agda is unavailable (${code})`);
     return;
   }
-  if (installation.version !== "2.8.0") {
+  if (!/^2\.8\.0(?:-[0-9a-f]{7,40})?$/.test(installation.version)) {
     context.skip(`Agda ${installation.version} is installed; live baseline requires 2.8.0`);
     return;
   }

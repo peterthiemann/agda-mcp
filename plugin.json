@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "agda-mcp",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Develop on-disk Agda proofs with semantic MCP tools and an incremental proof workflow.",
   "repository": "https://github.com/peterthiemann/agda-mcp",
   "license": "MIT",

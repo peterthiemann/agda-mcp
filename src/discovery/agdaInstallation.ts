@@ -7,6 +7,7 @@ import path from "node:path";
 import type { CompatibilityStatus } from "../application/domain.js";
 import type { ResolvedServerOptions } from "../application/config.js";
 import { ApplicationError } from "../application/errors.js";
+import { selectAgdaAdapter } from "../protocol/adapters/select.js";
 
 export const BASELINE_AGDA_VERSION = "2.8.0";
 export const BASELINE_ADAPTER = "agda-2.8.0";
@@ -144,11 +145,12 @@ export async function discoverAgdaInstallation(
   ]);
   const compatibility: CompatibilityStatus =
     version === BASELINE_AGDA_VERSION ? "supported" : "unverified";
+  const adapter = selectAgdaAdapter(version);
   const warnings =
     compatibility === "supported"
       ? []
       : [
-          `Agda ${version} is unverified; using the ${BASELINE_AGDA_VERSION} interaction adapter`,
+          `Agda ${version} is unverified; using the ${adapter.id} interaction adapter`,
         ];
 
   return Object.freeze({
@@ -156,7 +158,7 @@ export async function discoverAgdaInstallation(
     version,
     applicationDirectory,
     dataDirectory,
-    adapter: BASELINE_ADAPTER,
+    adapter: adapter.id,
     compatibility,
     warnings: Object.freeze(warnings),
   });

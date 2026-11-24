@@ -22,7 +22,7 @@ test("modern stdio supports discovery, roots MRTR, queries and incremental proof
     context.skip("Agda is unavailable; live proof integration requires Agda 2.8.0");
     return;
   }
-  if (installation.version !== "2.8.0") {
+  if (!/^2\.8\.0(?:-[0-9a-f]{7,40})?$/.test(installation.version)) {
     context.skip(`Agda ${installation.version} is installed; live baseline requires 2.8.0`);
     return;
   }

@@ -5,6 +5,21 @@ first.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-24
+
+### Fixed
+
+- Select the constraints interaction syntax from the probed Agda version:
+  retain `Cmd_constraints` on 2.8.0 and use `Cmd_constraints AsIs` on 2.9.0,
+  including official binaries with a source-commit suffix. Agda 2.9.0 remains
+  unverified for general compatibility; MCP schemas and result shapes are unchanged.
+- Preserve Agda 2.8.0 top-level `use_show_instance` quoting on 2.9.0,
+  including escaped strings and Unicode, while leaving local rendering unchanged.
+- Run official-binary constraints and targeted workflow checks for both versions
+  in CI, and accept source-commit suffixes in the 2.8.0 baseline test guards.
+
+## [0.5.0] - 2026-10-18
+
 ### Added
 
 - Bundled `agda-proof` Agent Skill and references in the npm package, with
@@ -23,7 +38,7 @@ first.
 
 ### Changed
 
-- Prepared server and plugin version 0.5.0; publishing remains a separate step.
+- Synchronized server and portable plugin at version 0.5.0.
 - Server initialization instructions point to the skill resource.
 
 ## [0.4.1] - 2026-08-07

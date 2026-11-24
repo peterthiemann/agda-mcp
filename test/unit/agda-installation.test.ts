@@ -32,7 +32,7 @@ test("executable resolution searches the supplied PATH and returns a real path",
   }
 });
 
-test("Agda probes select the pinned adapter and report unverified versions", async () => {
+test("Agda probes select the targeted 2.9.0 adapter but retain unverified status", async () => {
   const fixture = await executableFixture();
   const calls: string[] = [];
   const runner: ProbeRunner = async (_executable, arguments_, probeOptions) => {
@@ -54,9 +54,10 @@ test("Agda probes select the pinned adapter and report unverified versions", asy
       { runner },
     );
     assert.equal(installation.version, "2.9.0");
-    assert.equal(installation.adapter, "agda-2.8.0");
+    assert.equal(installation.adapter, "agda-2.9.0");
     assert.equal(installation.compatibility, "unverified");
     assert.match(installation.warnings[0] ?? "", /unverified/);
+    assert.match(installation.warnings[0] ?? "", /agda-2\.9\.0/);
     assert.deepEqual(calls.sort(), [
       "--numeric-version",
       "--print-agda-app-dir",

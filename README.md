@@ -112,14 +112,15 @@ wants to inspect or revise the proposal before changing the file.
 - Agda installed separately and available as `agda`, or configured explicitly
 - Agda 2.8.0 for the currently verified protocol adapter
 
-Other Agda versions start in `unverified` compatibility mode. The server does
-not bundle Agda or the standard library.
+Agda 2.9.0 passes targeted constraints, query, and guarded proof-edit tests, but
+remains `unverified`; general 2.9.0 compatibility is not guaranteed. Other
+versions also start in `unverified` mode. The server does not bundle Agda or
+the standard library.
 
 ## Installation and use
 
-These commands install the published npm version. Features described for the
-unreleased 0.5.0 candidate require a source build or local tarball until that
-version is published; see [INSTALL.md](INSTALL.md#pack--smoke-testing-an-unreleased-server).
+These commands install the published npm version; see
+[INSTALL.md](INSTALL.md) for plugin installation and local-package testing.
 
 Install the CLI globally:
 
@@ -305,9 +306,8 @@ remains the host's responsibility. When both the plugin and server expose the
 skill, hosts should preserve its origin rather than silently substituting one
 copy for the other.
 
-Version 0.5.0 is prepared locally and must be published before the plugin's
-pinned npm command is available to other users. Test the unreleased tarball
-with `npm run test:package` and the local-package smoke option in INSTALL.md.
+The plugin pins `agda-mcp@0.5.1`. Test local package changes with
+`npm run test:package` and the local-package smoke option in INSTALL.md.
 
 ## Configuration
 
@@ -572,7 +572,9 @@ locations across runs.
 
 That restart is sufficient when the new version still speaks the supported
 interaction protocol. Agda 2.8.0 is verified. A different detected version is
-reported as `unverified` and uses the 2.8.0 adapter conservatively. If a
+reported as `unverified`; see Requirements for the targeted compatibility
+coverage. Version-specific interaction adjustments preserve the baseline MCP
+result shapes. If a
 required command or response shape changed, the affected call returns
 `UNSUPPORTED_AGDA_PROTOCOL` with native evidence. Upgrade `agda-mcp` to a
 version containing an adapter for that Agda release (or contribute one) before
@@ -598,6 +600,33 @@ schema properties, and queue-policy properties. Defaults are 1,000 cases per
 property and 5,000 corpus mutations. Longer campaigns can be configured with
 `AGDA_MCP_PROPERTY_RUNS`, `AGDA_MCP_FUZZ_RUNS`, and `AGDA_MCP_FUZZ_SEED`.
 
+The constraints regression and targeted proof workflows have a separate CI
+matrix using official Agda 2.8.0 and 2.9.0 binaries and isolated home directories.
+To repeat one matrix entry locally after extracting an official release archive
+into a temporary directory:
+
+```sh
+npm run test:compile
+mkdir -p /tmp/agda-test-home
+HOME=/tmp/agda-test-home \
+AGDA_TEST_EXECUTABLE=/absolute/path/to/extracted/agda \
+AGDA_TEST_VERSION=2.9.0 \
+node --test .test-dist/test/integration/constraints-versions.test.js \
+  .test-dist/test/integration/targeted-compatibility.test.js
+```
+
+Repeat with the 2.8.0 executable and `AGDA_TEST_VERSION=2.8.0`. This targeted
+suite also checks goal/metavariable/context inspection, expression modes,
+refine previews and guarded edits, case splitting, auto in all source formats,
+stale-handle rejection, diagnostics, and recovery from semantic errors. It skips
+only when no explicit executable is supplied. Passing these targeted checks
+does not certify general 2.9.0 compatibility.
+
+Top-level `use_show_instance` preserves the baseline quoted string rendering
+(`"shown"`) on both tested versions, including escaping and Unicode; local
+`use_show_instance` returns the unquoted string (`shown`). This mode requires
+an in-scope `show` function.
+
 ## Releasing
 
 Subsequent releases are published to npm and GitHub by
@@ -619,10 +648,10 @@ For a release, synchronize `package.json`, `package-lock.json`, `src/version.ts`
 `plugin.json`, and the exact `agda-mcp@X.Y.Z` pin in `mcp.json`. Update the
 versioned examples in INSTALL.md as well. The npm version command updates only
 the two npm metadata files; it does not update the source constant or plugin
-configuration. For the prepared 0.5.0 release:
+configuration. For example, to prepare version 0.5.1:
 
 ```sh
-npm version 0.5.0 --allow-same-version --no-git-tag-version
+npm version 0.5.1 --allow-same-version --no-git-tag-version
 # Update src/version.ts, plugin.json, mcp.json, and INSTALL.md to match.
 npm run typecheck
 npm run test:all
@@ -632,10 +661,10 @@ make check-plugin
 make pack-plugin
 # Run both local-tarball smoke checks from INSTALL.md before publishing.
 git add package.json package-lock.json src/version.ts plugin.json mcp.json INSTALL.md
-git commit -m "Release 0.5.0"
+git commit -m "Release 0.5.1"
 git push
-git tag -a release-0.5.0 -m "Release 0.5.0"
-git push origin release-0.5.0
+git tag -a release-0.5.1 -m "Release 0.5.1"
+git push origin release-0.5.1
 ```
 
 Commit the complete implementation and skill before tagging, including all new

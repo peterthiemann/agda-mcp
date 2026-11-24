@@ -36,7 +36,7 @@ import {
   type AgdaInstallation,
   type InstallationDiscoveryDependencies,
 } from "../discovery/agdaInstallation.js";
-import { agda280Adapter } from "../protocol/adapters/agda-2.8.0.js";
+import { selectAgdaAdapter } from "../protocol/adapters/select.js";
 import type { RawAgdaResponse, RawCommandTranscript } from "./domain.js";
 import {
   WorkspaceSessionManager,
@@ -235,7 +235,7 @@ export class AgdaApplicationService implements AgdaService {
     this.#sessions = new WorkspaceSessionManager({
       serverOptions: options,
       installation,
-      adapter: agda280Adapter,
+      adapter: selectAgdaAdapter(installation.version),
       ...(dependencies.processHostFactory === undefined
         ? {}
         : { processHostFactory: dependencies.processHostFactory }),

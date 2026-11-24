@@ -5,19 +5,17 @@
 Use a local Agent Plugins-compatible host with stdio MCP and Agent Skills support.
 Install Node.js 22+ (including `npx`) and Agda separately; Agda 2.8.0 is the
 verified interaction adapter. Agda libraries remain managed by your Agda setup.
-After publication, the plugin downloads `agda-mcp@0.5.0` from npm on first use;
-it does not bundle
+The plugin downloads `agda-mcp@0.5.1` from npm on first use; it does not bundle
 Node, Agda, the standard library, or the server's npm dependency tree. Internet
 access and npm registry access are needed to populate the npm cache.
 
-Version 0.5.0 is an unreleased package prepared in this branch. Publish the
-server to npm before distributing the pinned plugin for normal installation.
-Until then, use the local tarball checks below.
+For development versions not yet published to npm, use the local tarball
+checks below before distributing a plugin with a new version pin.
 
 The exact launch command is:
 
 ```sh
-npx --yes agda-mcp@0.5.0 --dynamic-workspaces
+npx --yes agda-mcp@0.5.1 --dynamic-workspaces
 ```
 
 The npm version is pinned, rather than following `latest`; npm resolves its
@@ -30,8 +28,8 @@ incremental proof development and `apply:false` for requested previews.
 Verify the release checksum, then extract the archive into a stable location:
 
 ```sh
-shasum -a 256 -c agda-mcp-plugin-0.5.0.zip.sha256
-unzip agda-mcp-plugin-0.5.0.zip -d ./plugins
+shasum -a 256 -c agda-mcp-plugin-0.5.1.zip.sha256
+unzip agda-mcp-plugin-0.5.1.zip -d ./plugins
 ```
 
 The resulting `./plugins/agda-mcp-plugin` contains root `plugin.json`,
@@ -181,13 +179,13 @@ npm run build
 npm run test:package
 make pack-plugin
 npm pack --ignore-scripts --pack-destination .plugin-build
-python3 scripts/smoke-plugin.py .plugin-build/agda-mcp-plugin-0.5.0.zip --server-package .plugin-build/agda-mcp-0.5.0.tgz
-python3 scripts/smoke-plugin.py .plugin-build/agda-mcp-plugin-0.5.0.zip --server-package .plugin-build/agda-mcp-0.5.0.tgz --modern
+python3 scripts/smoke-plugin.py .plugin-build/agda-mcp-plugin-0.5.1.zip --server-package .plugin-build/agda-mcp-0.5.1.tgz
+python3 scripts/smoke-plugin.py .plugin-build/agda-mcp-plugin-0.5.1.zip --server-package .plugin-build/agda-mcp-0.5.1.tgz --modern
 ```
 
 The explicit `--server-package` override tests the local tarball with npm exec;
 it does not change the archived pinned command. Without that option the smoke
-test runs the registry pin, which requires 0.5.0 to have been published. The
+test runs the registry pin, which requires 0.5.1 to have been published. The
 legacy and modern checks verify discovered file digests, supporting resource reads, and a temporary
 proof's preview/apply workflow. Publishing remains an explicit release action.
 

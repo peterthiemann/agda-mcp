@@ -25,7 +25,7 @@ test("the compiled CLI serves the full tool surface over clean stdio framing", a
     context.skip(`Agda is unavailable (${code})`);
     return;
   }
-  if (installation.version !== "2.8.0") {
+  if (!/^2\.8\.0(?:-[0-9a-f]{7,40})?$/.test(installation.version)) {
     context.skip(`Agda ${installation.version} is installed; live baseline requires 2.8.0`);
     return;
   }
@@ -187,7 +187,7 @@ test("the compiled dynamic mutation server opens a selected workspace and applie
     context.skip(`Agda is unavailable (${code})`);
     return;
   }
-  if (installation.version !== "2.8.0") {
+  if (!/^2\.8\.0(?:-[0-9a-f]{7,40})?$/.test(installation.version)) {
     await rm(directory, { recursive: true, force: true });
     context.skip(`Agda ${installation.version} is installed; live baseline requires 2.8.0`);
     return;

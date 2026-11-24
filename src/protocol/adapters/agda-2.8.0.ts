@@ -74,7 +74,7 @@ function computeMode(mode: NormalizationMode | undefined): string {
   return COMPUTE_MODES[mode ?? "default"];
 }
 
-function encodeBody(command: AgdaCommand): string {
+function encodeBody(command: AgdaCommand, constraintsCommand: string): string {
   switch (command.kind) {
     case "load":
       return `Cmd_load ${encodeHaskellString(command.modulePath)} ${encodeHaskellStringList(command.arguments)}`;
@@ -83,7 +83,7 @@ function encodeBody(command: AgdaCommand): string {
     case "goalTypeContext":
       return `Cmd_goal_type_context ${rewriteMode(command.rewrite, "simplified")} ${goalArguments(command, "")}`;
     case "constraints":
-      return "Cmd_constraints";
+      return constraintsCommand;
     case "makeCase":
       return `Cmd_make_case ${goalArguments(command, command.variables ?? "")}`;
     case "refineOrIntro":
@@ -103,19 +103,35 @@ function encodeBody(command: AgdaCommand): string {
   }
 }
 
-export const agda280Adapter: AgdaProtocolAdapter = Object.freeze({
-  id: "agda-2.8.0",
-  agdaVersion: "2.8.0",
-  encodeCommand(command: AgdaCommand, context: AgdaCommandContext): string {
-    if (context.currentFile === "") invalid("currentFile must not be empty");
-    return `IOTCM ${encodeHaskellString(context.currentFile)} None Direct (${encodeBody(command)})\n`;
-  },
-  decodeEvent(value: unknown): NativeAgdaEvent {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) {
-      throw new ApplicationError("UNSUPPORTED_AGDA_PROTOCOL", "Agda JSON event must be an object", {
-        details: { value },
-      });
-    }
-    return value as NativeAgdaEvent;
-  },
-});
+// Share the baseline codec while allowing narrowly scoped interaction changes.
+export function createAgdaAdapter(
+  agdaVersion: string,
+  constraintsCommand: string,
+  preserveTopLevelShowRendering = false,
+): AgdaProtocolAdapter {
+  return Object.freeze({
+    id: `agda-${agdaVersion}`,
+    agdaVersion,
+    encodeCommand(command: AgdaCommand, context: AgdaCommandContext): string {
+      if (context.currentFile === "") invalid("currentFile must not be empty");
+      // 2.9.0 removes the string-literal quotes for top-level UseShowInstance.
+      // Compute the same `show (expression)` in ordinary mode instead, letting
+      // Agda render/escape the literal exactly as in 2.8.0. Goal-local mode is unchanged.
+      const nativeCommand: AgdaCommand = preserveTopLevelShowRendering &&
+        command.kind === "computeTopLevel" && command.mode === "use_show_instance"
+        ? { ...command, mode: "default", expression: `show (${command.expression})` }
+        : command;
+      return `IOTCM ${encodeHaskellString(context.currentFile)} None Direct (${encodeBody(nativeCommand, constraintsCommand)})\n`;
+    },
+    decodeEvent(value: unknown): NativeAgdaEvent {
+      if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        throw new ApplicationError("UNSUPPORTED_AGDA_PROTOCOL", "Agda JSON event must be an object", {
+          details: { value },
+        });
+      }
+      return value as NativeAgdaEvent;
+    },
+  });
+}
+
+export const agda280Adapter = createAgdaAdapter("2.8.0", "Cmd_constraints");

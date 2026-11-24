@@ -5,6 +5,7 @@ import test from "node:test";
 import { ApplicationError } from "../../src/application/errors.js";
 import type { AgdaCommand } from "../../src/protocol/adapter.js";
 import { agda280Adapter } from "../../src/protocol/adapters/agda-2.8.0.js";
+import { selectAgdaAdapter } from "../../src/protocol/adapters/select.js";
 import {
   encodeHaskellString,
   encodeHaskellStringList,
@@ -34,6 +35,40 @@ test("the Agda 2.8.0 adapter matches recorded command fixtures", async () => {
       entry.expected,
       entry.name,
     );
+  }
+});
+
+test("constraints encoding selects the exact syntax for each probed Agda version", () => {
+  for (const [version, body] of [
+    ["2.8.0", "Cmd_constraints"],
+    ["2.9.0", "Cmd_constraints AsIs"],
+  ] as const) {
+    const adapter = selectAgdaAdapter(version);
+    assert.equal(adapter.id, `agda-${version}`);
+    assert.equal(adapter.encodeCommand({ kind: "constraints" }, {
+      currentFile: "/workspace/Tiny.agda",
+    }), `IOTCM "/workspace/Tiny.agda" None Direct (${body})\n`);
+  }
+  assert.equal(selectAgdaAdapter("2.10.0"), agda280Adapter);
+  assert.equal(selectAgdaAdapter("2.9.0-abcdef0"), selectAgdaAdapter("2.9.0"));
+  assert.equal(selectAgdaAdapter("2.8.0-3d04bac"), agda280Adapter);
+  assert.equal(selectAgdaAdapter("2.9.1"), agda280Adapter);
+});
+
+test("top-level show preserves 2.8.0 rendering without changing local show or other modes", () => {
+  const context = { currentFile: "/workspace/Tiny.agda" };
+  assert.equal(selectAgdaAdapter("2.8.0").encodeCommand({
+    kind: "computeTopLevel", expression: "x", mode: "use_show_instance",
+  }, context), 'IOTCM "/workspace/Tiny.agda" None Direct (Cmd_compute_toplevel UseShowInstance "x")\n');
+  assert.equal(selectAgdaAdapter("2.9.0").encodeCommand({
+    kind: "computeTopLevel", expression: "x", mode: "use_show_instance",
+  }, context), 'IOTCM "/workspace/Tiny.agda" None Direct (Cmd_compute_toplevel DefaultCompute "show (x)")\n');
+  for (const command of [
+    { kind: "compute", interactionPoint: 0, expression: "x", mode: "use_show_instance" },
+    { kind: "computeTopLevel", expression: "x", mode: "default" },
+  ] as const) {
+    assert.equal(selectAgdaAdapter("2.9.0").encodeCommand(command, context),
+      agda280Adapter.encodeCommand(command, context));
   }
 });
 

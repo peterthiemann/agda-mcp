@@ -4,7 +4,7 @@
     "agda": {
       "type": "stdio",
       "command": "npx",
-      "args": ["--yes", "agda-mcp@0.5.0", "--dynamic-workspaces"]
+      "args": ["--yes", "agda-mcp@0.5.1", "--dynamic-workspaces"]
     }
   }
 }
